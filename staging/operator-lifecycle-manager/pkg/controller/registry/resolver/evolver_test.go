@@ -204,10 +204,7 @@ func TestNamespaceGenerationEvolver(t *testing.T) {
 				},
 			},
 			wantGen: NewGenerationFromOperators(
-				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g","kind":"k","version":"v"}`,
-				}}),
+				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, nil),
 				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, nil, nil),
 			),
 		},
@@ -269,14 +266,8 @@ func TestNamespaceGenerationEvolver(t *testing.T) {
 				},
 			},
 			wantGen: NewGenerationFromOperators(
-				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g","kind":"k","version":"v"}`,
-				}}),
-				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g2","kind":"k2","version":"v2"}`,
-				}}),
+				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, nil),
+				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, nil, nil, nil),
 				NewFakeOperatorSurface("provider2.v1", "provider2", "channel", "", "catsrc", "", []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, nil, nil, nil, nil),
 			),
 		},
@@ -311,14 +302,8 @@ func TestNamespaceGenerationEvolver(t *testing.T) {
 				},
 			},
 			wantGen: NewGenerationFromOperators(
-				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g","kind":"k","version":"v"}`,
-				}}),
-				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g2","kind":"k2","version":"v2"}`,
-				}}),
+				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, nil),
+				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, nil),
 				NewFakeOperatorSurface("provider2.v1", "provider2", "channel", "", "catsrc", "", nil, nil, []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, nil, nil),
 			),
 		},
@@ -353,18 +338,9 @@ func TestNamespaceGenerationEvolver(t *testing.T) {
 			},
 			wantGen: NewGenerationFromOperators(
 				NewFakeOperatorSurface("original", "o", "c", "", "s", "", []opregistry.APIKey{{"g3", "v3", "k3", "k3s"}}, nil, nil, nil, nil),
-				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g","kind":"k","version":"v"}`,
-				}}),
-				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g2","kind":"k2","version":"v2"}`,
-				}}),
-				NewFakeOperatorSurface("provider2.v1", "provider2", "channel", "", "catsrc", "", []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, []opregistry.APIKey{{"g3", "v3", "k3", "k3s"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g3","kind":"k3","version":"v3"}`,
-				}}),
+				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, nil),
+				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, nil, nil, nil),
+				NewFakeOperatorSurface("provider2.v1", "provider2", "channel", "", "catsrc", "", []opregistry.APIKey{{"g2", "v2", "k2", "k2s"}}, []opregistry.APIKey{{"g3", "v3", "k3", "k3s"}}, nil, nil, nil),
 			),
 		},
 		{
@@ -395,10 +371,7 @@ func TestNamespaceGenerationEvolver(t *testing.T) {
 			},
 			wantGen: NewGenerationFromOperators(
 				NewFakeOperatorSurface("updated", "o", "c", "original", "catsrc", "", nil, nil, nil, nil, nil),
-				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, []*api.Dependency{{
-					Type:  "olm.gvk",
-					Value: `{"group":"g","kind":"k","version":"v"}`,
-				}}),
+				NewFakeOperatorSurface("depender.v1", "depender", "channel", "", "catsrc", "", nil, []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, nil),
 				NewFakeOperatorSurface("provider.v1", "provider", "channel", "", "catsrc", "", []opregistry.APIKey{{"g", "v", "k", "ks"}}, nil, nil, nil, nil),
 			),
 		},
