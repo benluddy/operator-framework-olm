@@ -22,21 +22,31 @@ type SatResolver struct {
 	log logrus.FieldLogger
 }
 
-func NewDefaultSatResolver(rcp RegistryClientProvider, log logrus.FieldLogger) *SatResolver {
-	return &SatResolver{
-		cache: NewOperatorCache(rcp, log),
-		log: log,
-	}
+type OperatorsV1alpha1Resolver struct {
+	subLister              v1alpha1listers.SubscriptionLister
+	csvLister              v1alpha1listers.ClusterServiceVersionLister
+	ipLister               v1alpha1listers.InstallPlanLister
+	client                 versioned.Interface
+	kubeclient             kubernetes.Interface
+	globalCatalogNamespace string
+	satResolver            *SatResolver
+	updatedResolution      bool
 }
 
 type debugWriter struct {
 	logrus.FieldLogger
 }
 
-func (w *debugWriter) Write(b []byte) (int, error) {
-	n := len(b)
-	if n > 0 && b[n-1] == '\n' {
-		b = b[:n-1]
+func NewOperatorsV1alpha1Resolver(lister operatorlister.OperatorLister, client versioned.Interface, kubeclient kubernetes.Interface, globalCatalogNamespace string, updatedResolution bool) *OperatorsV1alpha1Resolver {
+	return &OperatorsV1alpha1Resolver{
+		subLister:              lister.OperatorsV1alpha1().SubscriptionLister(),
+		csvLister:              lister.OperatorsV1alpha1().ClusterServiceVersionLister(),
+		ipLister:               lister.OperatorsV1alpha1().InstallPlanLister(),
+		client:                 client,
+		kubeclient:             kubeclient,
+		globalCatalogNamespace: globalCatalogNamespace,
+		satResolver:            NewDefaultSatResolver(NewDefaultRegistryClientProvider(client)),
+		updatedResolution:      updatedResolution,
 	}
 	w.Debug(b)
 	return n, nil
@@ -149,59 +159,34 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 		operators[csvName] = op
 	}
 
-	if len(errs) > 0 {
-		return nil, utilerrors.NewAggregate(errs)
-	}
+	// create a map of operatorsourceinfo (subscription+catalogsource data) to the original subscriptions
+	subMap := r.sourceInfoToSubscriptions(subs)
+	// get a list of new operators to add to the generation
+	add := r.sourceInfoForNewSubscriptions(namespace, subMap)
 
-	return operators, nil
-}
-
-func (r *SatResolver) getSubscriptionInstallables(pkg string, current *Operator, catalog registry.CatalogKey, cachePredicates []OperatorPredicate, channelPredicates []OperatorPredicate, namespacedCache MultiCatalogOperatorFinder, visited map[OperatorSurface]*BundleInstallable) (map[string]solver.Installable, error) {
-	installables := make(map[string]solver.Installable, 0)
-	candidates := make([]*BundleInstallable, 0)
-
-	subInstallable := NewSubscriptionInstallable(pkg)
-	installables[string(subInstallable.Identifier())] = &subInstallable
-
-	bundles := namespacedCache.Catalog(catalog).Find(cachePredicates...)
-
-	// there are no options for this package, return early
-	if len(bundles) == 0 {
-		return installables, nil
-	}
-
-	sortedBundles, err := r.sortChannel(bundles)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, o := range Filter(sortedBundles, channelPredicates...) {
-		predicates := append(cachePredicates, WithCSVName(o.Identifier()))
-		id, installable, err := r.getBundleInstallables(catalog, predicates, catalog, namespacedCache, visited)
+	var operators OperatorSet
+	if !r.updatedResolution {
+		operators, err = r.generateOperators(csvs, subs, sourceQuerier, add)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		if len(id) != 1 {
-			// TODO better messages
-			return nil, fmt.Errorf("trouble generating installable for potential replacement bundle")
-		}
-
-		for _, i := range installable {
-			if _, ok := id[i.Identifier()]; ok {
-				candidates = append(candidates, i)
-			}
-			installables[string(i.Identifier())] = i
+	} else {
+		// new dependency resolution
+		namespaces := []string{namespace, r.globalCatalogNamespace}
+		operators, err = r.satResolver.SolveOperators(namespaces, csvs, subs, add)
+		if err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
-	depIds := make([]solver.Identifier, 0)
-	for _, c := range candidates {
-		// track which operator this is replacing, so that it can be realized when creating the resources on cluster
-		if current != nil {
-			c.Replaces = current.Identifier()
-		}
-		depIds = append(depIds, c.Identifier())
-	}
+	// if there's no error, we were able to satsify all constraints in the subscription set, so we calculate what
+	// changes to persist to the cluster and write them out as `steps`
+	steps := []*v1alpha1.Step{}
+	updatedSubs := []*v1alpha1.Subscription{}
+	bundleLookups := []v1alpha1.BundleLookup{}
+	for name, op := range operators {
+		_, isAdded := add[*op.SourceInfo()]
+		existingSubscription, subExists := subMap[*op.SourceInfo()]
 
 	// all candidates added as options for this constraint
 	subInstallable.AddDependency(depIds)
@@ -323,26 +308,26 @@ func (r *SatResolver) sortByVersion(bundles []*Operator) []*Operator {
 	return sortedBundles
 }
 
-// sorts bundle in a channel by replaces
-func (r *SatResolver) sortChannel(bundles []*Operator) ([]*Operator, error) {
-	if len(bundles) <= 1 {
-		return bundles, nil
+func (r *OperatorsV1alpha1Resolver) generateOperators(csvs []*v1alpha1.ClusterServiceVersion, subs []*v1alpha1.Subscription, sourceQuerier SourceQuerier, add map[OperatorSourceInfo]struct{}) (OperatorSet, error) {
+	gen, err := NewGenerationFromCluster(csvs, subs)
+	if err != nil {
+		return nil, err
 	}
 
-	channel := []*Operator{}
-
-	bundleLookup := map[string]*Operator{}
-
-	// if a replacedBy b, then replacedBy[b] = a
-	replacedBy := map[*Operator]*Operator{}
-	replaces := map[*Operator]*Operator{}
-
-	for _, b := range bundles {
-		bundleLookup[b.Identifier()] = b
+	// evolve a generation by resolving the set of subscriptions (in `add`) by querying with `source`
+	// and taking the current generation (in `gen`) into account
+	if err := NewNamespaceGenerationEvolver(sourceQuerier, gen).Evolve(add); err != nil {
+		return nil, err
 	}
 
-	for _, b := range bundles {
-		if b.replaces == "" {
+	return gen.Operators(), nil
+}
+
+func (r *OperatorsV1alpha1Resolver) sourceInfoForNewSubscriptions(namespace string, subs map[OperatorSourceInfo]*v1alpha1.Subscription) (add map[OperatorSourceInfo]struct{}) {
+	add = make(map[OperatorSourceInfo]struct{})
+	for key, sub := range subs {
+		if sub.Status.CurrentCSV == "" {
+			add[key] = struct{}{}
 			continue
 		}
 		if r, ok := bundleLookup[b.replaces]; ok {

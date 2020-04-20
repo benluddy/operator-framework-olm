@@ -17,6 +17,23 @@ import (
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry"
 )
 
+type CatalogKey struct {
+	Name      string
+	Namespace string
+}
+
+func (k *CatalogKey) String() string {
+	return fmt.Sprintf("%s/%s", k.Name, k.Namespace)
+}
+
+func (k *CatalogKey) IsEmpty() bool {
+	return k.Name == "" && k.Namespace == ""
+}
+
+func (k *CatalogKey) IsEqual(compare CatalogKey) bool {
+	return k.Name == compare.Name && k.Namespace == compare.Namespace
+}
+
 type APISet map[opregistry.APIKey]struct{}
 
 func EmptyAPISet() APISet {
@@ -216,7 +233,7 @@ type OperatorSurface interface {
 	SourceInfo() *OperatorSourceInfo
 	Bundle() *api.Bundle
 	Inline() bool
-	Dependencies() []*api.Dependency
+	VersionDependencies() []VersionDependency
 }
 
 type Operator struct {
@@ -227,7 +244,14 @@ type Operator struct {
 	version             *semver.Version
 	bundle              *api.Bundle
 	sourceInfo          *OperatorSourceInfo
-	dependencies        []*api.Dependency
+	versionDependencies []VersionDependency
+}
+
+type VersionDependency struct {
+	Package string
+	Version semver.Version
+	// TODO: BundleImage string
+	// TODO: VersionRange string
 }
 
 var _ OperatorSurface = &Operator{}
@@ -364,63 +388,6 @@ func (o *Operator) Inline() bool {
 	return o.bundle != nil && o.bundle.GetBundlePath() == ""
 }
 
-func (o *Operator) Dependencies() []*api.Dependency {
-	return o.bundle.Dependencies
+func (o *Operator) VersionDependencies() []VersionDependency {
+	return o.versionDependencies
 }
-
-func (o *Operator) DependencyPredicates() (predicates []OperatorPredicate, err error) {
-	predicates = make([]OperatorPredicate, 0)
-	for _, d := range o.bundle.Dependencies {
-		var p OperatorPredicate
-		if d == nil || d.Type == "" {
-			continue
-		}
-		p, err = PredicateForDependency(d)
-		if err != nil {
-			return
-		}
-		predicates = append(predicates, p)
-	}
-	return
-}
-
-// TODO: this should go in its own dependency/predicate builder package
-// TODO: can we make this more extensible, i.e. via cue
-func PredicateForDependency(dependency *api.Dependency) (OperatorPredicate, error) {
-	p, ok := predicates[dependency.Type]
-	if !ok {
-		return nil, fmt.Errorf("no predicate for dependency type %s", dependency.Type)
-	}
-	return p(dependency.Value)
-}
-
-var predicates = map[string]func(string) (OperatorPredicate, error) {
-	opregistry.GVKType: predicateForGVKDependency,
-	opregistry.PackageType: predicateForPackageDependency,
-}
-
-func predicateForGVKDependency(value string) (OperatorPredicate, error) {
-	var gvk opregistry.GVKDependency
-	if err := json.Unmarshal([]byte(value), &gvk); err != nil {
-		return nil, err
-	}
-	return ProvidingAPI(opregistry.APIKey{
-		Group:   gvk.Group,
-		Version: gvk.Version,
-		Kind:    gvk.Kind,
-	}), nil
-}
-
-func predicateForPackageDependency(value string) (OperatorPredicate, error) {
-	var pkg opregistry.PackageDependency
-	if err := json.Unmarshal([]byte(value), &pkg); err != nil {
-		return nil, err
-	}
-	ver, err := semver.ParseRange(pkg.Version)
-	if err != nil {
-		return nil, err
-	}
-
-	return And(WithPackage(pkg.PackageName), WithVersionInRange(ver)), nil
-}
-
