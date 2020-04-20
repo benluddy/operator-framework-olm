@@ -176,8 +176,7 @@ func (c *OperatorCache) populate(ctx context.Context, snapshot *CatalogSnapshot,
 		}
 		o.providedAPIs = o.ProvidedAPIs().StripPlural()
 		o.requiredAPIs = o.RequiredAPIs().StripPlural()
-		o.replaces = b.Replaces
-		operators = append(operators, o)
+		operators = append(operators, *o)
 	}
 	if err := it.Error(); err != nil {
 		snapshot.logger.Warnf("error encountered while listing bundles: %s", err.Error())

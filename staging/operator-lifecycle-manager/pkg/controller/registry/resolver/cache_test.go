@@ -16,9 +16,7 @@ import (
 
 	"github.com/operator-framework/operator-registry/pkg/api"
 	"github.com/operator-framework/operator-registry/pkg/client"
-	opregistry "github.com/operator-framework/operator-registry/pkg/registry"
-
-	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry"
+	registry "github.com/operator-framework/operator-registry/pkg/registry"
 )
 
 type BundleStreamStub struct {
@@ -287,7 +285,7 @@ func TestCatalogSnapshotFind(t *testing.T) {
 
 func TestStripPluralRequiredAndProvidedAPIKeys(t *testing.T) {
 	rcp := RegistryClientProviderStub{}
-	key := registry.CatalogKey{Namespace: "testnamespace", Name: "testname"}
+	key := CatalogKey{Namespace: "testnamespace", Name: "testname"}
 	rcp[key] = &RegistryClientStub{
 		BundleIterator: client.NewBundleIterator(&BundleStreamStub{
 			Bundles: []*api.Bundle{{
@@ -304,30 +302,14 @@ func TestStripPluralRequiredAndProvidedAPIKeys(t *testing.T) {
 					Kind:    "K2",
 					Plural:  "ks2",
 				}},
-				Properties: apiSetToProperties(map[opregistry.APIKey]struct{}{
-					{
-						Group:   "g",
-						Version: "v1",
-						Kind:    "K",
-						Plural:  "ks",
-					}: {},
-				}, nil),
-				Dependencies: apiSetToDependencies(map[opregistry.APIKey]struct{}{
-					{
-						Group:   "g2",
-						Version: "v2",
-						Kind:    "K2",
-						Plural:  "ks2",
-					}: {},
-				}, nil),
 			}},
 		}),
 	}
 
-	c := NewOperatorCache(rcp, logrus.New())
+	c := NewOperatorCache(rcp)
 
 	nc := c.Namespaced("testnamespace")
-	result, err := AtLeast(1, nc.Find(ProvidingAPI(opregistry.APIKey{Group: "g", Version: "v1", Kind: "K"})))
+	result, err := nc.GetRequiredAPIFromAllCatalogs(registry.APIKey{Group: "g", Version: "v1", Kind: "K"})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(result))
 	assert.Equal(t, "K.v1.g", result[0].providedAPIs.String())
