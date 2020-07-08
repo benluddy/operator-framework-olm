@@ -18,105 +18,154 @@ func TestSolveOperators(t *testing.T) {
 	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
 	Provides := APISet
 
-	namespace := "olm"
-	catalog := registry.CatalogKey{"community", namespace}
-
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: {
-				operators: []*Operator{
-					genOperator("packageA.v1", "0.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, nil),
+func TestNamespaceResolver(t *testing.T) {
+	namespace := "catsrc-namespace"
+	catalog := CatalogKey{"catsrc", namespace}
+	type out struct {
+		steps   [][]*v1alpha1.Step
+		lookups []v1alpha1.BundleLookup
+		subs    []*v1alpha1.Subscription
+		err     error
+	}
+	nothing := out{
+		steps:   [][]*v1alpha1.Step{},
+		lookups: []v1alpha1.BundleLookup{},
+		subs:    []*v1alpha1.Subscription{},
+	}
+	tests := []struct {
+		name             string
+		clusterState     []runtime.Object
+		querier          SourceQuerier
+		bundlesByCatalog map[CatalogKey][]*api.Bundle
+		out              out
+	}{
+		{
+			name: "SingleNewSubscription/NoDeps",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil), namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
-	}
-	satResolver := SatResolver{
-		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
-	}
-
-	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
-	assert.NoError(t, err)
-
-	// TODO: decide if the original operator should be returned here, and update the rests of the tests based on that decision
-	expected := OperatorSet{
-		"packageB.v1": genOperator("packageB.v1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, nil),
-	}
-	require.EqualValues(t, expected, operators)
-}
-
-func TestSolveOperators_MultipleChannels(t *testing.T) {
-	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
-	Provides := APISet
-
-	namespace := "olm"
-	catalog := registry.CatalogKey{"community", namespace}
-
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: {
-				operators: []*Operator{
-					genOperator("packageA.v1", "0.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1", "1.0.0", "packageB", "beta", "community", "olm", nil, nil, nil),
+		{
+			name: "SingleNewSubscription/ResolveOne",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil),
+					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), namespace, "", catalog),
+					subSteps(namespace, "b.v1", "b", "beta", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
-	}
-	satResolver := SatResolver{
-		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
-	}
-
-	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(operators))
-	for _, op := range operators {
-		assert.Equal(t, "alpha", op.Bundle().ChannelName)
-	}
-}
-
-func TestSolveOperators_FindLatestVersion(t *testing.T) {
-	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
-	Provides := APISet
-
-	namespace := "olm"
-	catalog := registry.CatalogKey{"community", namespace}
-
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, nil),
+		{
+			name: "SingleNewSubscription/ResolveOne/BundlePath",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
+					stripManifests(withBundlePath(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd")),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
+					subSteps(namespace, "b.v1", "b", "beta", catalog),
+				},
+				lookups: []v1alpha1.BundleLookup{
+					{
+						Path:       "quay.io/test/bundle@sha256:abcd",
+						Identifier: "b.v1",
+						CatalogSourceRef: &corev1.ObjectReference{
+							Namespace: catalog.Namespace,
+							Name:      catalog.Name,
+						},
+						Conditions: []v1alpha1.BundleLookupCondition{
+							{
+								Type:    BundleLookupConditionPacked,
+								Status:  corev1.ConditionTrue,
+								Reason:  controllerbundle.NotUnpackedReason,
+								Message: controllerbundle.NotUnpackedMessage,
+							},
+							{
+								Type:    v1alpha1.BundleLookupPending,
+								Status:  corev1.ConditionTrue,
+								Reason:  controllerbundle.JobNotStartedReason,
+								Message: controllerbundle.JobNotStartedMessage,
+							},
+						},
+					},
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
+				},
+			},
+		},
+		{
+			name: "SingleNewSubscription/ResolveOne/AdditionalBundleObjects",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&rbacv1.RoleBinding{TypeMeta: metav1.TypeMeta{Kind: "RoleBinding", APIVersion: "rbac.authorization.k8s.io/v1"}, ObjectMeta: metav1.ObjectMeta{Name: "test-rb"}})),
+					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
+					bundleSteps(withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&rbacv1.RoleBinding{TypeMeta: metav1.TypeMeta{Kind: "RoleBinding", APIVersion: "rbac.authorization.k8s.io/v1"}, ObjectMeta: metav1.ObjectMeta{Name: "test-rb"}})), namespace, "", catalog),
+					subSteps(namespace, "b.v1", "b", "beta", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
+				},
+			},
+		},
+		{
+			name: "SingleNewSubscription/ResolveOne/AdditionalBundleObjects/Service",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&corev1.Service{TypeMeta: metav1.TypeMeta{Kind: "Service", APIVersion: ""}, ObjectMeta: metav1.ObjectMeta{Name: "test-service"}})),
+					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
+					bundleSteps(withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&corev1.Service{TypeMeta: metav1.TypeMeta{Kind: "Service", APIVersion: ""}, ObjectMeta: metav1.ObjectMeta{Name: "test-service"}})), namespace, "", catalog),
+					subSteps(namespace, "b.v1", "b", "beta", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -148,89 +197,129 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 
 	opToAddVersionDeps := []*api.Dependency{
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageC", "version"": "1.0.1"}`,
+			name: "SingleNewSubscription/DependencyMissing",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
+				},
+			},
+			out: nothing,
 		},
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageD", "version"": "1.0.1"}`,
+			name: "InstalledSub/NoUpdates",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+				},
+			},
+			out: nothing,
 		},
-	}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "community", "olm", nil, nil, nil),
+		{
+			name: "InstalledSub/UpdateAvailable",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil),
+					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
 				},
 			},
 		},
-	}
-	satResolver := SatResolver{
-		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
-	}
-
-	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
-	assert.NoError(t, err)
-	assert.Equal(t, 4, len(operators))
-	for _, op := range operators {
-		assert.Equal(t, "1.0.1", op.Version().String())
-	}
-}
-
-func TestSolveOperators_FindLatestVersionWithDependencies_ManyVersionsInCatalog(t *testing.T) {
-	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
-	Provides := APISet
-
-	namespace := "olm"
-	catalog := registry.CatalogKey{"community", namespace}
-
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
-
-	opToAddVersionDeps := []*api.Dependency{
+		// {
+		// 	name: "InstalledSub/UpdateAvailable/FromBundlePath",
+		// 	clusterState: []runtime.Object{
+		// 		existingSub(namespace, "a.v1", "a", "alpha", catalog),
+		// 		existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+		// 	},
+		// 	bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: []*api.Bundle{stripManifests(withBundlePath(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd"))}},
+		// 	out: out{
+		// 		steps: [][]*v1alpha1.Step{},
+		// 		lookups: []v1alpha1.BundleLookup{
+		// 			{
+		// 				Path:       "quay.io/test/bundle@sha256:abcd",
+		// 				Identifier: "a.v2",
+		// 				Replaces:   "a.v1",
+		// 				CatalogSourceRef: &corev1.ObjectReference{
+		// 					Namespace: catalog.Namespace,
+		// 					Name:      catalog.Name,
+		// 				},
+		// 				Conditions: []v1alpha1.BundleLookupCondition{
+		// 					{
+		// 						Type:    BundleLookupConditionPacked,
+		// 						Status:  corev1.ConditionTrue,
+		// 						Reason:  controllerbundle.NotUnpackedReason,
+		// 						Message: controllerbundle.NotUnpackedMessage,
+		// 					},
+		// 					{
+		// 						Type:    v1alpha1.BundleLookupPending,
+		// 						Status:  corev1.ConditionTrue,
+		// 						Reason:  controllerbundle.JobNotStartedReason,
+		// 						Message: controllerbundle.JobNotStartedMessage,
+		// 					},
+		// 				},
+		// 			},
+		// 		},
+		// 		subs: []*v1alpha1.Subscription{
+		// 			updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+		// 		},
+		// 	},
+		// },
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageC", "version"": "1.0.1"}`,
+			name: "InstalledSub/NoRunningOperator",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil), namespace, "", catalog),
+				},
+				// no updated subs because existingSub already points the right CSV, it just didn't exist for some reason
+				subs: []*v1alpha1.Subscription{},
+			},
 		},
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageD", "version"": "1.0.1"}`,
-		},
-	}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.1.0", "0.1.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.2.0", "0.2.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.3.0", "0.3.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.4.0", "0.4.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.5.0", "0.5.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.6.0", "0.6.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.7.0", "0.7.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.8.0", "0.8.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "community", "olm", nil, nil, nil),
+			name: "InstalledSub/UpdateFound/UpdateRequires/ResolveOne",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
+					bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil),
+					bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), namespace, "", catalog),
+					subSteps(namespace, "b.v1", "b", "beta", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -262,112 +351,73 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 
 	opToAddVersionDeps := []*api.Dependency{
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageC", "version"": "1.0.1"}`,
+			name: "InstalledSub/UpdateFound/UpdateRequires/ResolveOne/APIServer",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", nil, nil, Provides1, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
+					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, Requires1),
+					bundle("b.v1", "b", "beta", "", nil, nil, Provides1, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, Requires1), namespace, "", catalog),
+					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, Provides1, nil), namespace, "", catalog),
+					subSteps(namespace, "b.v1", "b", "beta", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+				},
+			},
 		},
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageD", "version"": "1.0.1"}`,
+			name: "InstalledSub/SingleNewSubscription/UpdateAvailable/ResolveOne",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+				newSub(namespace, "b", "beta", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
+					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil),
+					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v1", "b", "beta", catalog),
+				},
+			},
 		},
-	}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "community", "olm", nil, nil, nil),
+		{
+			name: "InstalledSub/SingleNewSubscription/NoRunningOperator/ResolveOne",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				newSub(namespace, "b", "beta", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
 				},
 			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat1",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "community", "olm", nil, nil, nil),
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
 				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat2",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "community", "olm", nil, nil, nil),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat3",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "cat3", "olm", nil, nil, opToAddVersionDeps),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat4",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat5",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat6",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat7",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "cat8",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "ns2",
-				Name:      "cat9",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "cat3", "olm", nil, nil, nil),
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "b.v1", "b", "beta", catalog),
 				},
 			},
 		},
@@ -400,37 +450,101 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 
 	opToAddVersionDeps := []*api.Dependency{
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageC", "version"": "1.0.1"}`,
+			name: "InstalledSub/SingleNewSubscription/NoRunningOperator/ResolveOne/APIServer",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				newSub(namespace, "b", "beta", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, nil, Provides1, nil),
+					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, nil, Provides1, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "b.v1", "b", "beta", catalog),
+				},
+			},
 		},
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageD", "version"": "1.0.1"}`,
+			// This test verifies that version deadlock that could happen with the previous algorithm can't happen here
+			name: "NoMoreVersionDeadlock",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, Requires2, nil, nil),
+				existingSub(namespace, "b.v1", "b", "alpha", catalog),
+				existingOperator(namespace, "b.v1", "b", "alpha", "", Provides2, Requires1, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v2", "a", "alpha", "a.v1", Provides3, Requires4, nil, nil),
+					bundle("b.v2", "b", "alpha", "b.v1", Provides4, Requires3, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", Provides3, Requires4, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v2", "b", "alpha", "b.v1", Provides4, Requires3, nil, nil), namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v2", "b", "alpha", catalog),
+				},
+			},
 		},
 	}
 	nestedVersionDeps := []*api.Dependency{
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageE", "version"": "1.0.1"}`,
+			// This test verifies that ownership of an api can be migrated between two operators
+			name: "OwnedAPITransfer",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+				existingSub(namespace, "b.v1", "b", "alpha", catalog),
+				existingOperator(namespace, "b.v1", "b", "alpha", "", nil, Requires1, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil),
+					bundle("b.v2", "b", "alpha", "b.v1", Provides1, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v2", "b", "alpha", "b.v1", Provides1, nil, nil, nil), namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v2", "b", "alpha", catalog),
+				},
+			},
 		},
-	}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v0.9.0", "0.9.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1.0.0", "1.0.0", "packageC", "alpha", "community", "olm", nil, nil, nestedVersionDeps),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "community", "olm", nil, nil, nestedVersionDeps),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageE.v1.0.1", "1.0.1", "packageE", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageE.v1.0.0", "1.0.0", "packageE", "alpha", "community", "olm", nil, nil, nil),
+		{
+			name: "PicksOlderProvider",
+			clusterState: []runtime.Object{
+				newSub(namespace, "b", "alpha", catalog),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil),
+					bundle("b.v1", "b", "alpha", "", nil, Requires1, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v1", "b", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
+					subSteps(namespace, "a.v1", "a", "alpha", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "b.v1", "b", "alpha", catalog),
 				},
 			},
 		},
@@ -462,21 +576,55 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 
 	opToAddVersionDeps := []*api.Dependency{
 		{
-			Type:  "olm.gvk",
-			Value: `{"packageName": "packageC", "version"": "0.1.0"}`,
+			name: "InstalledSub/UpdateInHead/SkipRange",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: []*api.Bundle{bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil)}},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil), namespace, "a.v1", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v3", "a", "alpha", catalog),
+				},
+			},
 		},
-	}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1", "0.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1", "0.1.0", "packageC", "alpha", "community", "olm", nil, nil, nil),
+		{
+			// This test uses logic that implements the FakeSourceQuerier to ensure
+			// that the required API is provided by the new Operator.
+			//
+			// Background:
+			// OLM used to add the new operator to the generation before removing
+			// the old operator from the generation. The logic that removes an operator
+			// from the current generation removes the APIs it provides from the list of
+			// "available" APIs. This caused OLM to search for an operator that provides the API.
+			// If the operator that provides the API uses a skipRange rather than the Spec.Replaces
+			// field, the Replaces field is set to an empty string, causing OLM to fail to upgrade.
+			name: "InstalledSubs/ExistingOperators/OldCSVsReplaced",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingSub(namespace, "b.v1", "b", "beta", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
+				existingOperator(namespace, "b.v1", "b", "beta", "", Provides1, nil, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
+				catalog: {
+					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
+					bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil),
+					bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil),
+					bundle("b.v2", "b", "beta", "b.v1", Provides1, nil, nil, nil),
+				},
+			},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil), namespace, "", catalog),
+					bundleSteps(bundle("b.v2", "b", "beta", "b.v1", Provides1, nil, nil, nil), namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v2", "b", "beta", catalog),
 				},
 			},
 		},
@@ -498,7 +646,40 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			kClientFake := k8sfake.NewSimpleClientset()
 
 			resolver := NewOperatorsV1alpha1Resolver(lister, clientFake, kClientFake, "", false)
+
+			tt.querier = NewFakeSourceQuerier(tt.bundlesByCatalog)
 			steps, lookups, subs, err := resolver.ResolveSteps(namespace, tt.querier)
+			require.Equal(t, tt.out.err, err)
+			t.Logf("%#v", steps)
+			RequireStepsEqual(t, expectedSteps, steps)
+			require.ElementsMatch(t, tt.out.lookups, lookups)
+			require.ElementsMatch(t, tt.out.subs, subs)
+
+			// todo -- factor this out
+			stubSnapshot := &CatalogSnapshot{}
+			for _, bundles := range tt.bundlesByCatalog {
+				for _, bundle := range bundles {
+					op, err := NewOperatorFromBundle(bundle, "", catalog)
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					stubSnapshot.operators = append(stubSnapshot.operators, *op)
+				}
+			}
+			stubCache := &stubOperatorCacheProvider{
+				noc: &NamespacedOperatorCache{
+					snapshots: map[CatalogKey]*CatalogSnapshot{
+						catalog: stubSnapshot,
+					},
+				},
+			}
+			satresolver := &SatResolver{
+				cache: stubCache,
+			}
+			resolver.satResolver = satresolver
+			resolver.updatedResolution = true
+
+			steps, lookups, subs, err = resolver.ResolveSteps(namespace, tt.querier)
 			require.Equal(t, tt.out.err, err)
 			t.Logf("%#v", steps)
 			RequireStepsEqual(t, expectedSteps, steps)
@@ -512,9 +693,17 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 	assert.Equal(t, 3, len(operators))
 }
 
-func TestSolveOperators_WithGVKDependencies(t *testing.T) {
-	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
-	Provides := APISet
+type stubOperatorCacheProvider struct {
+	noc *NamespacedOperatorCache
+}
+
+func (stub *stubOperatorCacheProvider) Namespaced(namespaces ...string) *NamespacedOperatorCache {
+	return stub.noc
+}
+
+func TestNamespaceResolverRBAC(t *testing.T) {
+	namespace := "catsrc-namespace"
+	catalog := CatalogKey{"catsrc", namespace}
 
 	namespace := "olm"
 	catalog := registry.CatalogKey{"community", namespace}
