@@ -173,7 +173,7 @@ func TestOperatorCacheReuse(t *testing.T) {
 		}),
 	}
 
-	c := NewOperatorCache(rcp, logrus.New())
+	c := NewOperatorCache(rcp)
 
 	require.Len(t, c.Namespaced("dummynamespace").Catalog(key).Find(WithCSVName("csvname")), 1)
 }
@@ -309,7 +309,7 @@ func TestStripPluralRequiredAndProvidedAPIKeys(t *testing.T) {
 	c := NewOperatorCache(rcp)
 
 	nc := c.Namespaced("testnamespace")
-	result, err := nc.GetRequiredAPIFromAllCatalogs(registry.APIKey{Group: "g", Version: "v1", Kind: "K"})
+	result, err := AtLeast(1, nc.Find(ProvidingAPI(registry.APIKey{Group: "g", Version: "v1", Kind: "K"})))
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(result))
 	assert.Equal(t, "K.v1.g", result[0].providedAPIs.String())
