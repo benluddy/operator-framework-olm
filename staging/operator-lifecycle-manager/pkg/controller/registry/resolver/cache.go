@@ -40,7 +40,7 @@ type CatalogDependencyCache interface {
 	GetCSVNameFromCatalog(csvName string, catalog CatalogKey) (Operator, error)
 	GetCSVNameFromAllCatalogs(csvName string) ([]Operator, error)
 	GetPackageFromAllCatalogs(pkg string) ([]Operator, error)
-	GetPackageVersionFromAllCatalogs(pkg string, version semver.Version) ([]Operator, error)
+	GetPackageVersionFromAllCatalogs(pkg string, inRange semver.Range) ([]Operator, error)
 	GetPackageChannelFromCatalog(pkg, channel string, catalog CatalogKey) ([]Operator, error)
 	GetRequiredAPIFromAllCatalogs(requiredAPI registry.APIKey) ([]Operator, error)
 	GetChannelCSVNameFromCatalog(csvName, channel string, catalog CatalogKey) (Operator, error)
@@ -394,19 +394,15 @@ func AtLeast(n int, operators []*Operator) ([]*Operator, error) {
 	return operators, nil
 }
 
-func ExactlyOne(operators []*Operator) (*Operator, error) {
-	if len(operators) != 1 {
-		return nil, fmt.Errorf("expected exactly one operator, got %d", len(operators))
+func (n *NamespacedOperatorCache) GetPackageVersionFromAllCatalogs(pkg string, inRange semver.Range) ([]Operator, error) {
+	var result []Operator
+	for _, s := range n.snapshots {
+		result = append(result, s.Find(func(o *Operator) bool {
+			return o.Package() == pkg && inRange(*o.version)
+		})...)
 	}
-	return operators[0], nil
-}
-
-func Filter(operators []*Operator, p ...OperatorPredicate) []*Operator {
-	var result []*Operator
-	for _, o := range operators {
-		if Matches(o, p...) {
-			result = append(result, o)
-		}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("operator with package %s and version %v not found in any catalog", pkg, inRange)
 	}
 	return result
 }
