@@ -678,7 +678,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			resolver.updatedResolution = true
 
 			steps, lookups, subs, err = resolver.ResolveSteps(namespace, tt.querier)
-			require.Equal(t, tt.out.err, err)
+			require.Equal(t, tt.out.err, err, "%s", err)
 			t.Logf("%#v", steps)
 			RequireStepsEqual(t, expectedSteps, steps)
 			require.ElementsMatch(t, tt.out.lookups, lookups)
