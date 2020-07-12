@@ -233,86 +233,11 @@ func apiSetToGVK(crds, apis APISet) (out []*api.GroupVersionKind) {
 	return
 }
 
-func apiSetToDependencies(crds, apis APISet) (out []*api.Dependency) {
-	if len(crds) + len(apis) == 0 {
-		return nil
-	}
-	out = make([]*api.Dependency, 0)
-	for a := range crds {
-		val, err := json.Marshal(opregistry.GVKDependency{
-			Group:   a.Group,
-			Kind:    a.Kind,
-			Version: a.Version,
-		})
-		if err != nil {
-			panic(err)
-		}
-		out = append(out, &api.Dependency{
-			Type: opregistry.GVKType,
-			Value: string(val),
-		})
-	}
-	for a := range apis {
-		val, err := json.Marshal(opregistry.GVKDependency{
-			Group:   a.Group,
-			Kind:    a.Kind,
-			Version: a.Version,
-		})
-		if err != nil {
-			panic(err)
-		}
-		out = append(out, &api.Dependency{
-			Type: opregistry.GVKType,
-			Value: string(val),
-		})
-	}
-	return
-}
-
-func apiSetToProperties(crds, apis APISet) (out []*api.Property) {
-	out = make([]*api.Property, 0)
-	for a := range crds {
-		val, err := json.Marshal(opregistry.GVKProperty{
-			Group:   a.Group,
-			Kind:    a.Kind,
-			Version: a.Version,
-		})
-		if err != nil {
-			panic(err)
-		}
-		out = append(out, &api.Property{
-			Type: opregistry.GVKType,
-			Value: string(val),
-		})
-	}
-	for a := range apis {
-		val, err := json.Marshal(opregistry.GVKProperty{
-			Group:   a.Group,
-			Kind:    a.Kind,
-			Version: a.Version,
-		})
-		if err != nil {
-			panic(err)
-		}
-		out = append(out, &api.Property{
-			Type: opregistry.GVKType,
-			Value: string(val),
-		})
-	}
-	return
-}
-
 type bundleOpt func(*api.Bundle)
 
 func withSkipRange(skipRange string) bundleOpt {
 	return func(b *api.Bundle) {
 		b.SkipRange = skipRange
-	}
-}
-
-func withSkips(skips []string) bundleOpt {
-	return func(b *api.Bundle) {
-		b.Skips = skips
 	}
 }
 
@@ -344,11 +269,9 @@ func bundle(name, pkg, channel, replaces string, providedCRDs, requiredCRDs, pro
 		CsvJson:      string(csvJson),
 		Object:       objs,
 		Version:      "0.0.0",
-		ProvidedApis: apiSetToGVK(providedCRDs, providedAPIServices),
-		RequiredApis: apiSetToGVK(requiredCRDs, requiredAPIServices),
+		ProvidedApis: apiSetToGVk(providedCRDs, providedAPIServices),
+		RequiredApis: apiSetToGVk(requiredCRDs, requiredAPIServices),
 		Replaces:     replaces,
-		Dependencies: apiSetToDependencies(requiredCRDs, requiredAPIServices),
-		Properties:   apiSetToProperties(providedCRDs, providedAPIServices),
 	}
 	for _, f := range opts {
 		f(b)
@@ -444,15 +367,7 @@ func NewFakeSourceQuerier(bundlesByCatalog map[registry.CatalogKey][]*api.Bundle
 
 		source.GetReplacementBundleInPackageChannelStub = func(ctx context.Context, bundleName, packageName, channelName string) (*api.Bundle, error) {
 			for _, b := range bundles {
-				if len(b.CsvJson) == 0 {
-					continue
-				}
-				csv, err := V1alpha1CSVFromBundle(b)
-				if err != nil {
-					panic(err)
-				}
-				replaces := csv.Spec.Replaces
-				if replaces == bundleName && b.ChannelName == channelName && b.PackageName == packageName {
+				if b.Replaces == bundleName && b.ChannelName == channelName && b.PackageName == packageName {
 					return b, nil
 				}
 			}

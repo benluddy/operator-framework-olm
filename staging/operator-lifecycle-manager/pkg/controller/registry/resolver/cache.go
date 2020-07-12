@@ -188,6 +188,7 @@ func (c *OperatorCache) populate(ctx context.Context, snapshot *CatalogSnapshot,
 		}
 		o.providedAPIs = o.ProvidedAPIs().StripPlural()
 		o.requiredAPIs = o.RequiredAPIs().StripPlural()
+		o.replaces = b.Replaces
 		operators = append(operators, o)
 	}
 	if err := it.Error(); err != nil {
@@ -283,6 +284,7 @@ func (s *CatalogSnapshot) Find(p ...OperatorPredicate) []*Operator {
 		for _, each := range p {
 			if !each(o) {
 				failed = true
+				break
 			}
 		}
 		if !failed {

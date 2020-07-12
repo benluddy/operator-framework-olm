@@ -11,7 +11,13 @@ import (
 	"github.com/operator-framework/operator-registry/pkg/api"
 	opregistry "github.com/operator-framework/operator-registry/pkg/registry"
 
-	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned/fake"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/informers/externalversions"
+	controllerbundle "github.com/operator-framework/operator-lifecycle-manager/pkg/controller/bundle"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry/resolver/solve"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/lib/operatorlister"
 )
 
 func TestSolveOperators(t *testing.T) {
@@ -22,10 +28,11 @@ func TestNamespaceResolver(t *testing.T) {
 	namespace := "catsrc-namespace"
 	catalog := CatalogKey{"catsrc", namespace}
 	type out struct {
-		steps   [][]*v1alpha1.Step
-		lookups []v1alpha1.BundleLookup
-		subs    []*v1alpha1.Subscription
-		err     error
+		steps       [][]*v1alpha1.Step
+		lookups     []v1alpha1.BundleLookup
+		subs        []*v1alpha1.Subscription
+		err         error
+		solverError solve.NotSatisfiable
 	}
 	nothing := out{
 		steps:   [][]*v1alpha1.Step{},
@@ -54,7 +61,7 @@ func TestNamespaceResolver(t *testing.T) {
 					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -76,7 +83,7 @@ func TestNamespaceResolver(t *testing.T) {
 					subSteps(namespace, "b.v1", "b", "beta", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -121,7 +128,7 @@ func TestNamespaceResolver(t *testing.T) {
 					},
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -143,7 +150,7 @@ func TestNamespaceResolver(t *testing.T) {
 					subSteps(namespace, "b.v1", "b", "beta", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -165,7 +172,7 @@ func TestNamespaceResolver(t *testing.T) {
 					subSteps(namespace, "b.v1", "b", "beta", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -206,7 +213,40 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 				},
 			},
-			out: nothing,
+			out: out{
+				steps:   [][]*v1alpha1.Step{},
+				lookups: []v1alpha1.BundleLookup{},
+				subs:    []*v1alpha1.Subscription{},
+				solverError: solve.NotSatisfiable([]solve.AppliedConstraint{
+					{
+						Installable: VirtPackageInstallable{
+							identifier: "a",
+							constraints: []solve.Constraint{
+								solve.Mandatory(),
+								solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+							},
+						},
+						Constraint: solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+					},
+					{
+						Installable: &BundleInstallable{
+							identifier:  "catsrc/catsrc-namespace/alpha/a.v1",
+							constraints: []solve.Constraint{solve.Prohibited()},
+						},
+						Constraint: solve.Prohibited(),
+					},
+					{
+						Installable: VirtPackageInstallable{
+							identifier: "a",
+							constraints: []solve.Constraint{
+								solve.Mandatory(),
+								solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+							},
+						},
+						Constraint: solve.Mandatory(),
+					},
+				}),
+			},
 		},
 		{
 			name: "InstalledSub/NoUpdates",
@@ -238,7 +278,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -248,7 +288,9 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: []*api.Bundle{stripManifests(withBundlePath(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd"))}},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
+				stripManifests(withBundlePath(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd"))},
+			},
 			out: out{
 				steps: [][]*v1alpha1.Step{},
 				lookups: []v1alpha1.BundleLookup{
@@ -277,7 +319,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					},
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -319,7 +361,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					subSteps(namespace, "b.v1", "b", "beta", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -370,7 +412,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 					subSteps(namespace, "b.v1", "b", "beta", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -394,8 +436,8 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
-					updatedSub(namespace, "b.v1", "b", "beta", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v1", "", "b", "beta", catalog),
 				},
 			},
 		},
@@ -417,7 +459,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "b.v1", "b", "beta", catalog),
+					updatedSub(namespace, "b.v1", "", "b", "beta", catalog),
 				},
 			},
 		},
@@ -467,7 +509,7 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "b.v1", "b", "beta", catalog),
+					updatedSub(namespace, "b.v1", "", "b", "beta", catalog),
 				},
 			},
 		},
@@ -492,8 +534,8 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					bundleSteps(bundle("b.v2", "b", "alpha", "b.v1", Provides4, Requires3, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
-					updatedSub(namespace, "b.v2", "b", "alpha", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v2", "b.v1", "b", "alpha", catalog),
 				},
 			},
 		},
@@ -518,8 +560,8 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					bundleSteps(bundle("b.v2", "b", "alpha", "b.v1", Provides1, nil, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
-					updatedSub(namespace, "b.v2", "b", "alpha", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v2", "b.v1", "b", "alpha", catalog),
 				},
 			},
 		},
@@ -542,7 +584,7 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					subSteps(namespace, "a.v1", "a", "alpha", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "b.v1", "b", "alpha", catalog),
+					updatedSub(namespace, "b.v1", "", "b", "alpha", catalog),
 				},
 			},
 		},
@@ -579,13 +621,15 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: []*api.Bundle{bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil)}},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
+				bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
+			}},
 			out: out{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil), namespace, "a.v1", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v3", "a", "alpha", catalog),
+					updatedSub(namespace, "a.v3", "a.v1", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -621,8 +665,8 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 					bundleSteps(bundle("b.v2", "b", "beta", "b.v1", Provides1, nil, nil, nil), namespace, "", catalog),
 				},
 				subs: []*v1alpha1.Subscription{
-					updatedSub(namespace, "a.v2", "a", "alpha", catalog),
-					updatedSub(namespace, "b.v2", "b", "beta", catalog),
+					updatedSub(namespace, "a.v2", "a.v1", "a", "alpha", catalog),
+					updatedSub(namespace, "b.v2", "b.v1", "b", "beta", catalog),
 				},
 			},
 		},
@@ -648,7 +692,6 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			tt.querier = NewFakeSourceQuerier(tt.bundlesByCatalog)
 			steps, lookups, subs, err := resolver.ResolveSteps(namespace, tt.querier)
 			require.Equal(t, tt.out.err, err)
-			t.Logf("%#v", steps)
 			RequireStepsEqual(t, expectedSteps, steps)
 			require.ElementsMatch(t, tt.out.lookups, lookups)
 			require.ElementsMatch(t, tt.out.subs, subs)
@@ -661,6 +704,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
 					}
+					op.replaces = bundle.Replaces
 					stubSnapshot.operators = append(stubSnapshot.operators, op)
 				}
 			}
@@ -678,8 +722,12 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			resolver.updatedResolution = true
 
 			steps, lookups, subs, err = resolver.ResolveSteps(namespace, tt.querier)
-			require.Equal(t, tt.out.err, err, "%s", err)
-			t.Logf("%#v", steps)
+			if tt.out.solverError == nil {
+				require.Equal(t, tt.out.err, err, "%s", err)
+			} else {
+				// the solver outputs useful information on a failed resolution, which is different from the old resolver
+				require.ElementsMatch(t, tt.out.solverError, err.(solve.NotSatisfiable))
+			}
 			RequireStepsEqual(t, expectedSteps, steps)
 			require.ElementsMatch(t, tt.out.lookups, lookups)
 			require.ElementsMatch(t, tt.out.subs, subs)
@@ -729,48 +777,24 @@ func TestNamespaceResolverRBAC(t *testing.T) {
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
 	}
-
-	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(operators))
-}
-
-func TestSolveOperators_WithNestedGVKDependencies(t *testing.T) {
-	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
-	Provides := APISet
-
-	namespace := "olm"
-	catalog := registry.CatalogKey{"community", namespace}
-
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
-
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "1.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1.0.0", "1.0.0", "packageB", "alpha", "community", "olm", Provides, nil, nil),
-					genOperator("packageB.v1.0.1", "1.0.1", "packageB", "alpha", "community", "olm", Provides, nil, nil),
-					genOperator("packageC.v1.0.0", "1.0.0", "packageC", "alpha", "community", "olm", Provides2, Provides, nil),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "community", "olm", Provides2, Provides, nil),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "community", "olm", nil, Provides2, nil),
-				},
+	tests := []struct {
+		name             string
+		clusterState     []runtime.Object
+		bundlesInCatalog []*api.Bundle
+		out              out
+	}{
+		{
+			name: "NewSubscription/Permissions/ClusterPermissions",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
 			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "certified",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageC.v1.0.0", "1.0.0", "packageC", "alpha", "certified", "olm", Provides2, Provides, nil),
-					genOperator("packageC.v1.0.1", "1.0.1", "packageC", "alpha", "certified", "olm", Provides2, Provides, nil),
-					genOperator("packageD.v1.0.1", "1.0.1", "packageD", "alpha", "certified", "olm", nil, Provides2, nil),
+			bundlesInCatalog: []*api.Bundle{bundle},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle, namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
 				},
 			},
 		},
@@ -882,43 +906,43 @@ func TestSolveOperators_IgnoreUnsatisfiableDependencies(t *testing.T) {
 		},
 	}
 
-	fakeNamespacedOperatorCache := NamespacedOperatorCache{
-		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1", "0.0.1", "packageA", "alpha", "community", "olm", nil, nil, nil),
-					genOperator("packageB.v1", "1.0.0", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1", "0.1.0", "packageC", "alpha", "community", "olm", nil, nil, unsatisfiableVersionDeps),
-				},
-			},
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "certified",
-			}: &CatalogSnapshot{
-				operators: []*Operator{
-					genOperator("packageA.v1", "0.0.1", "packageA", "alpha", "certified", "olm", nil, nil, nil),
-					genOperator("packageB.v1", "1.0.0", "packageB", "alpha", "certified", "olm", nil, nil, opToAddVersionDeps),
-					genOperator("packageC.v1", "0.1.0", "packageC", "alpha", "certified", "olm", nil, nil, nil),
-				},
-			},
+func updatedSub(namespace, currentOperatorName, installedOperatorName, pkg, channel string, catalog CatalogKey) *v1alpha1.Subscription {
+	return &v1alpha1.Subscription{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pkg + "-" + channel,
+			Namespace: namespace,
+		},
+		Spec: &v1alpha1.SubscriptionSpec{
+			Package:                pkg,
+			Channel:                channel,
+			CatalogSource:          catalog.Name,
+			CatalogSourceNamespace: catalog.Namespace,
+		},
+		Status: v1alpha1.SubscriptionStatus{
+			CurrentCSV:   currentOperatorName,
+			InstalledCSV: installedOperatorName,
 		},
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
 	}
 
-	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(operators))
-	for _, op := range operators {
-		if op.Identifier() == "packageC.v1" {
-			assert.Equal(t, "certified", op.SourceInfo().Catalog.Name)
-		} else {
-			assert.Equal(t, "community", op.SourceInfo().Catalog.Name)
-		}
+func existingSub(namespace, operatorName, pkg, channel string, catalog CatalogKey) *v1alpha1.Subscription {
+	return &v1alpha1.Subscription{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pkg + "-" + channel,
+			Namespace: namespace,
+		},
+		Spec: &v1alpha1.SubscriptionSpec{
+			Package:                pkg,
+			Channel:                channel,
+			CatalogSource:          catalog.Name,
+			CatalogSourceNamespace: catalog.Namespace,
+		},
+		Status: v1alpha1.SubscriptionStatus{
+			CurrentCSV:   operatorName,
+			InstalledCSV: operatorName,
+		},
 	}
 }
 
