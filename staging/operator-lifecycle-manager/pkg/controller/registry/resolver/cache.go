@@ -91,7 +91,7 @@ func NewOperatorCache(rcp RegistryClientProvider) *OperatorCache {
 
 type NamespacedOperatorCache struct {
 	namespaces []string
-	snapshots  map[registry.CatalogKey]*CatalogSnapshot
+	snapshots map[CatalogKey]*CatalogSnapshot
 }
 
 func (c *OperatorCache) Namespaced(namespaces ...string) MultiCatalogOperatorFinder {
@@ -104,7 +104,7 @@ func (c *OperatorCache) Namespaced(namespaces ...string) MultiCatalogOperatorFin
 
 	result := NamespacedOperatorCache{
 		namespaces: namespaces,
-		snapshots:  make(map[registry.CatalogKey]*CatalogSnapshot),
+		snapshots: make(map[CatalogKey]*CatalogSnapshot),
 	}
 
 	var misses []registry.CatalogKey
@@ -207,7 +207,9 @@ func (c *NamespacedOperatorCache) Catalog(k CatalogKey) OperatorFinder {
 
 func (c *NamespacedOperatorCache) Find(p ...OperatorPredicate) []*Operator {
 	var result []*Operator
-	for _, snapshot := range c.snapshots {
+	sorted := NewSortableSnapshots(c.namespaces, c.snapshots)
+	sort.Sort(sorted)
+	for _, snapshot := range sorted.snapshots {
 		result = append(result, snapshot.Find(p...)...)
 	}
 	return result
@@ -231,13 +233,13 @@ func (s *CatalogSnapshot) Expired(at time.Time) bool {
 }
 
 type SortableSnapshots struct {
-	snapshots  []*CatalogSnapshot
+	snapshots []*CatalogSnapshot
 	namespaces map[string]int
 }
 
-func NewSortableSnapshots(namespaces []string, snapshots map[registry.CatalogKey]*CatalogSnapshot) SortableSnapshots {
+func NewSortableSnapshots(namespaces []string, snapshots map[CatalogKey]*CatalogSnapshot) SortableSnapshots {
 	sorted := SortableSnapshots{
-		snapshots:  make([]*CatalogSnapshot, 0),
+		snapshots: make([]*CatalogSnapshot, 0),
 		namespaces: make(map[string]int, 0),
 	}
 	for i, n := range namespaces {
@@ -260,7 +262,7 @@ func (s SortableSnapshots) Len() int {
 // index i should sort before the element with index j.
 func (s SortableSnapshots) Less(i, j int) bool {
 	if s.snapshots[i].key.Namespace != s.snapshots[j].key.Namespace {
-		return s.namespaces[s.snapshots[i].key.Namespace] < s.namespaces[s.snapshots[j].key.Namespace]
+		return s.namespaces[s.snapshots[i].key.Namespace] <  s.namespaces[s.snapshots[j].key.Namespace]
 	}
 	return s.snapshots[i].key.Name < s.snapshots[j].key.Name
 }
