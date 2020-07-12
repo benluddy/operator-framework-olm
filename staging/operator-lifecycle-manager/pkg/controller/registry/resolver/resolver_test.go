@@ -217,13 +217,20 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 				steps:   [][]*v1alpha1.Step{},
 				lookups: []v1alpha1.BundleLookup{},
 				subs:    []*v1alpha1.Subscription{},
+				//err: solve.NotSatisfiable{
+				//	solve.AppliedConstraint{Installable:(*resolver.BundleInstallable)(0xc0005f0d40), Constraint:solve.prohibited{}},
+				//	solve.AppliedConstraint{Installable:(*resolver.SubscriptionInstallable)(0xc0007af830), Constraint:solve.dependency{"catsrc/catsrc-namespace/alpha/a.v1"}},
+				//	solve.AppliedConstraint{Installable:(*resolver.SubscriptionInstallable)(0xc0007af830), Constraint:solve.mandatory{}}
+				//}
+
 				solverError: solve.NotSatisfiable([]solve.AppliedConstraint{
 					{
-						Installable: VirtPackageInstallable{
+						Installable: &SubscriptionInstallable{
 							identifier: "a",
 							constraints: []solve.Constraint{
 								solve.Mandatory(),
 								solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+								solve.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
 							},
 						},
 						Constraint: solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
@@ -236,11 +243,12 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 						Constraint: solve.Prohibited(),
 					},
 					{
-						Installable: VirtPackageInstallable{
+						Installable: &SubscriptionInstallable{
 							identifier: "a",
 							constraints: []solve.Constraint{
 								solve.Mandatory(),
 								solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+								solve.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
 							},
 						},
 						Constraint: solve.Mandatory(),
@@ -726,6 +734,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 				require.Equal(t, tt.out.err, err, "%s", err)
 			} else {
 				// the solver outputs useful information on a failed resolution, which is different from the old resolver
+				require.NotNil(t, err)
 				require.ElementsMatch(t, tt.out.solverError, err.(solve.NotSatisfiable))
 			}
 			RequireStepsEqual(t, expectedSteps, steps)

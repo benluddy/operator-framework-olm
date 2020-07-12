@@ -173,7 +173,7 @@ func (r *SatResolver) SolveOperators(namespaces []string, csvs []*v1alpha1.Clust
 	} else {
 		// new dependency resolution
 		namespaces := []string{namespace, r.globalCatalogNamespace}
-		operators, err = r.satResolver.SolveOperators(namespaces, csvs, subs, add)
+		operators, err = r.satResolver.SolveOperators(namespaces, csvs, subs)
 		if err != nil {
 			return nil, nil, nil, err
 		}
