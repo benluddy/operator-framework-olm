@@ -678,7 +678,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 	}
 }
 
-func TestOldResolver(t *testing.T) {
+func TestResolverOld(t *testing.T) {
 	namespace := "catsrc-namespace"
 	for _, tt := range SharedResolverSpecs() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -696,7 +696,7 @@ func TestOldResolver(t *testing.T) {
 			lister.OperatorsV1alpha1().RegisterClusterServiceVersionLister(namespace, informerFactory.Operators().V1alpha1().ClusterServiceVersions().Lister())
 			kClientFake := k8sfake.NewSimpleClientset()
 
-			resolver := NewOperatorsV1alpha1Resolver(lister, clientFake, kClientFake, "", false)
+			resolver := NewOperatorsV1alpha1Resolver(lister, clientFake, kClientFake, "")
 
 			tt.querier = NewFakeSourceQuerier(tt.bundlesByCatalog)
 			steps, lookups, subs, err := resolver.ResolveSteps(namespace, tt.querier)
@@ -708,7 +708,7 @@ func TestOldResolver(t *testing.T) {
 	}
 }
 
-func TestNewResolver(t *testing.T) {
+func TestResolverNew(t *testing.T) {
 	namespace := "catsrc-namespace"
 	catalog := CatalogKey{"catsrc", namespace}
 
@@ -750,8 +750,6 @@ func TestNewResolver(t *testing.T) {
 			lister.OperatorsV1alpha1().RegisterClusterServiceVersionLister(namespace, informerFactory.Operators().V1alpha1().ClusterServiceVersions().Lister())
 			kClientFake := k8sfake.NewSimpleClientset()
 
-			resolver := NewOperatorsV1alpha1Resolver(lister, clientFake, kClientFake, "", false)
-			tt.querier = NewFakeSourceQuerier(tt.bundlesByCatalog)
 
 			stubSnapshot := &CatalogSnapshot{}
 			for _, bundles := range tt.bundlesByCatalog {
@@ -774,10 +772,10 @@ func TestNewResolver(t *testing.T) {
 			satresolver := &SatResolver{
 				cache: stubCache,
 			}
+			resolver := NewSatStepResolver(lister, clientFake, kClientFake, "")
 			resolver.satResolver = satresolver
-			resolver.updatedResolution = true
 
-			steps, lookups, subs, err := resolver.ResolveSteps(namespace, tt.querier)
+			steps, lookups, subs, err := resolver.ResolveSteps(namespace, nil)
 			if tt.out.solverError == nil {
 				require.Equal(t, tt.out.err, err, "%s", err)
 			} else {
@@ -872,7 +870,7 @@ func TestNamespaceResolverRBAC(t *testing.T) {
 			lister.OperatorsV1alpha1().RegisterSubscriptionLister(namespace, informerFactory.Operators().V1alpha1().Subscriptions().Lister())
 			lister.OperatorsV1alpha1().RegisterClusterServiceVersionLister(namespace, informerFactory.Operators().V1alpha1().ClusterServiceVersions().Lister())
 
-			resolver := NewOperatorsV1alpha1Resolver(lister, clientFake, kClientFake, "", false)
+			resolver := NewOperatorsV1alpha1Resolver(lister, clientFake, kClientFake, "")
 			querier := NewFakeSourceQuerier(map[CatalogKey][]*api.Bundle{catalog: tt.bundlesInCatalog})
 			steps, _, subs, err := resolver.ResolveSteps(namespace, querier)
 			require.Equal(t, tt.out.err, err)
