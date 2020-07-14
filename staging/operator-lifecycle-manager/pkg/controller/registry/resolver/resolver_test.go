@@ -24,28 +24,31 @@ func TestSolveOperators(t *testing.T) {
 	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
 	Provides := APISet
 
-func TestNamespaceResolver(t *testing.T) {
+type resolverTest struct {
+	name             string
+	clusterState     []runtime.Object
+	querier          SourceQuerier
+	bundlesByCatalog map[CatalogKey][]*api.Bundle
+	out              resolverTestOut
+}
+
+type resolverTestOut struct {
+	steps       [][]*v1alpha1.Step
+	lookups     []v1alpha1.BundleLookup
+	subs        []*v1alpha1.Subscription
+	err         error
+	solverError solve.NotSatisfiable
+}
+
+func SharedResolverSpecs() []resolverTest {
 	namespace := "catsrc-namespace"
 	catalog := CatalogKey{"catsrc", namespace}
-	type out struct {
-		steps       [][]*v1alpha1.Step
-		lookups     []v1alpha1.BundleLookup
-		subs        []*v1alpha1.Subscription
-		err         error
-		solverError solve.NotSatisfiable
-	}
-	nothing := out{
+	nothing := resolverTestOut{
 		steps:   [][]*v1alpha1.Step{},
 		lookups: []v1alpha1.BundleLookup{},
 		subs:    []*v1alpha1.Subscription{},
 	}
-	tests := []struct {
-		name             string
-		clusterState     []runtime.Object
-		querier          SourceQuerier
-		bundlesByCatalog map[CatalogKey][]*api.Bundle
-		out              out
-	}{
+	return []resolverTest{
 		{
 			name: "SingleNewSubscription/NoDeps",
 			clusterState: []runtime.Object{
@@ -56,7 +59,7 @@ func TestNamespaceResolver(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil), namespace, "", catalog),
 				},
@@ -76,7 +79,7 @@ func TestNamespaceResolver(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), namespace, "", catalog),
@@ -98,7 +101,7 @@ func TestNamespaceResolver(t *testing.T) {
 					stripManifests(withBundlePath(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd")),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
 					subSteps(namespace, "b.v1", "b", "beta", catalog),
@@ -143,7 +146,7 @@ func TestNamespaceResolver(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
 					bundleSteps(withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&rbacv1.RoleBinding{TypeMeta: metav1.TypeMeta{Kind: "RoleBinding", APIVersion: "rbac.authorization.k8s.io/v1"}, ObjectMeta: metav1.ObjectMeta{Name: "test-rb"}})), namespace, "", catalog),
@@ -165,7 +168,7 @@ func TestNamespaceResolver(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
 					bundleSteps(withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&corev1.Service{TypeMeta: metav1.TypeMeta{Kind: "Service", APIVersion: ""}, ObjectMeta: metav1.ObjectMeta{Name: "test-service"}})), namespace, "", catalog),
@@ -213,16 +216,10 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps:   [][]*v1alpha1.Step{},
 				lookups: []v1alpha1.BundleLookup{},
 				subs:    []*v1alpha1.Subscription{},
-				//err: solve.NotSatisfiable{
-				//	solve.AppliedConstraint{Installable:(*resolver.BundleInstallable)(0xc0005f0d40), Constraint:solve.prohibited{}},
-				//	solve.AppliedConstraint{Installable:(*resolver.SubscriptionInstallable)(0xc0007af830), Constraint:solve.dependency{"catsrc/catsrc-namespace/alpha/a.v1"}},
-				//	solve.AppliedConstraint{Installable:(*resolver.SubscriptionInstallable)(0xc0007af830), Constraint:solve.mandatory{}}
-				//}
-
 				solverError: solve.NotSatisfiable([]solve.AppliedConstraint{
 					{
 						Installable: &SubscriptionInstallable{
@@ -281,7 +278,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), namespace, "", catalog),
 				},
@@ -299,7 +296,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
 				stripManifests(withBundlePath(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd"))},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{},
 				lookups: []v1alpha1.BundleLookup{
 					{
@@ -341,7 +338,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil), namespace, "", catalog),
 				},
@@ -362,7 +359,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 					bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), namespace, "", catalog),
@@ -413,7 +410,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 					bundle("b.v1", "b", "beta", "", nil, nil, Provides1, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, Requires1), namespace, "", catalog),
 					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, Provides1, nil), namespace, "", catalog),
@@ -438,7 +435,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
@@ -461,7 +458,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
@@ -511,7 +508,7 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", nil, nil, Provides1, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v1", "b", "beta", "", nil, nil, nil, nil), namespace, "", catalog),
@@ -536,7 +533,7 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					bundle("b.v2", "b", "alpha", "b.v1", Provides4, Requires3, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", Provides3, Requires4, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v2", "b", "alpha", "b.v1", Provides4, Requires3, nil, nil), namespace, "", catalog),
@@ -562,7 +559,7 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					bundle("b.v2", "b", "alpha", "b.v1", Provides1, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v2", "b", "alpha", "b.v1", Provides1, nil, nil, nil), namespace, "", catalog),
@@ -585,7 +582,7 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 					bundle("b.v1", "b", "alpha", "", nil, Requires1, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v1", "b", "alpha", "", nil, Requires1, nil, nil), namespace, "", catalog),
@@ -632,7 +629,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
 				bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
 			}},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil), namespace, "a.v1", catalog),
 				},
@@ -667,7 +664,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 					bundle("b.v2", "b", "beta", "b.v1", Provides1, nil, nil, nil),
 				},
 			},
-			out: out{
+			out: resolverTestOut{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil), namespace, "", catalog),
 					bundleSteps(bundle("b.v2", "b", "beta", "b.v1", Provides1, nil, nil, nil), namespace, "", catalog),
@@ -679,7 +676,11 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			},
 		},
 	}
-	for _, tt := range tests {
+}
+
+func TestOldResolver(t *testing.T) {
+	namespace := "catsrc-namespace"
+	for _, tt := range SharedResolverSpecs() {
 		t.Run(tt.name, func(t *testing.T) {
 			stopc := make(chan struct{})
 			defer func() {
@@ -703,8 +704,55 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			RequireStepsEqual(t, expectedSteps, steps)
 			require.ElementsMatch(t, tt.out.lookups, lookups)
 			require.ElementsMatch(t, tt.out.subs, subs)
+		})
+	}
+}
 
-			// todo -- factor this out
+func TestNewResolver(t *testing.T) {
+	namespace := "catsrc-namespace"
+	catalog := CatalogKey{"catsrc", namespace}
+
+	tests := append(SharedResolverSpecs(),
+		resolverTest{
+			name: "InstalledSub/UpdatesAvailable/SkipRangeNotInHead",
+			clusterState: []runtime.Object{
+				existingSub(namespace, "a.v1", "a", "alpha", catalog),
+				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
+			},
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
+				bundle("a.v2", "a", "alpha", "", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
+				bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
+				bundle("a.v4", "a", "alpha", "a.v3", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0 !0.0.0")),
+			}},
+			out: resolverTestOut{
+				steps: [][]*v1alpha1.Step{
+					bundleSteps(bundle("a.v3", "a", "alpha", "", nil, nil, nil, nil), namespace, "a.v1", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v3", "a.v1", "a", "alpha", catalog),
+				},
+			},
+		},
+	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stopc := make(chan struct{})
+			defer func() {
+				stopc <- struct{}{}
+			}()
+			expectedSteps := []*v1alpha1.Step{}
+			for _, steps := range tt.out.steps {
+				expectedSteps = append(expectedSteps, steps...)
+			}
+			clientFake, informerFactory, _ := StartResolverInformers(namespace, stopc, tt.clusterState...)
+			lister := operatorlister.NewLister()
+			lister.OperatorsV1alpha1().RegisterSubscriptionLister(namespace, informerFactory.Operators().V1alpha1().Subscriptions().Lister())
+			lister.OperatorsV1alpha1().RegisterClusterServiceVersionLister(namespace, informerFactory.Operators().V1alpha1().ClusterServiceVersions().Lister())
+			kClientFake := k8sfake.NewSimpleClientset()
+
+			resolver := NewOperatorsV1alpha1Resolver(lister, clientFake, kClientFake, "", false)
+			tt.querier = NewFakeSourceQuerier(tt.bundlesByCatalog)
+
 			stubSnapshot := &CatalogSnapshot{}
 			for _, bundles := range tt.bundlesByCatalog {
 				for _, bundle := range bundles {
@@ -729,7 +777,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 			resolver.satResolver = satresolver
 			resolver.updatedResolution = true
 
-			steps, lookups, subs, err = resolver.ResolveSteps(namespace, tt.querier)
+			steps, lookups, subs, err := resolver.ResolveSteps(namespace, tt.querier)
 			if tt.out.solverError == nil {
 				require.Equal(t, tt.out.err, err, "%s", err)
 			} else {
