@@ -3,7 +3,8 @@ package resolver
 import (
 	"context"
 	"fmt"
-	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry"
+	"github.com/sirupsen/logrus"
+	"time"
 
 	"github.com/blang/semver"
 	"github.com/sirupsen/logrus"
@@ -45,7 +46,7 @@ type SatStepResolver struct {
 	satResolver            *SatResolver
 }
 
-func NewSatStepResolver(lister operatorlister.OperatorLister, client versioned.Interface, kubeclient kubernetes.Interface, globalCatalogNamespace string) *SatStepResolver {
+func NewSatStepResolver(lister operatorlister.OperatorLister, client versioned.Interface, kubeclient kubernetes.Interface, globalCatalogNamespace string, log logrus.FieldLogger) *SatStepResolver {
 	return &SatStepResolver{
 		subLister:              lister.OperatorsV1alpha1().SubscriptionLister(),
 		csvLister:              lister.OperatorsV1alpha1().ClusterServiceVersionLister(),
@@ -53,7 +54,7 @@ func NewSatStepResolver(lister operatorlister.OperatorLister, client versioned.I
 		client:                 client,
 		kubeclient:             kubeclient,
 		globalCatalogNamespace: globalCatalogNamespace,
-		satResolver:            NewDefaultSatResolver(NewDefaultRegistryClientProvider(client)),
+		satResolver:            NewDefaultSatResolver(NewDefaultRegistryClientProvider(client), log),
 	}
 }
 

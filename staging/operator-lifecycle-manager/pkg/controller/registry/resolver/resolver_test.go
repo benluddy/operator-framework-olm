@@ -1,6 +1,8 @@
 package resolver
 
 import (
+	"github.com/sirupsen/logrus"
+	"strings"
 	"testing"
 
 	"github.com/blang/semver"
@@ -809,7 +811,7 @@ func TestResolverNew(t *testing.T) {
 			satresolver := &SatResolver{
 				cache: stubCache,
 			}
-			resolver := NewSatStepResolver(lister, clientFake, kClientFake, "")
+			resolver := NewSatStepResolver(lister, clientFake, kClientFake, "", logrus.New())
 			resolver.satResolver = satresolver
 
 			steps, lookups, subs, err := resolver.ResolveSteps(namespace, nil)
