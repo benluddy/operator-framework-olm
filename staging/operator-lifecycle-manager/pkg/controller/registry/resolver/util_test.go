@@ -45,7 +45,7 @@ func NewGenerationFromOperators(ops ...OperatorSurface) *NamespaceGeneration {
 	return g
 }
 
-func NewFakeOperatorSurface(name, pkg, channel, replaces, src, startingCSV string, providedCRDs, requiredCRDs, providedAPIServices, requiredAPIServices []opregistry.APIKey, dependencies []VersionDependency) *Operator {
+func NewFakeOperatorSurface(name, pkg, channel, replaces, src, startingCSV string, providedCRDs, requiredCRDs, providedAPIServices, requiredAPIServices []opregistry.APIKey, dependencies []*api.Dependency) *Operator {
 	providedAPISet := EmptyAPISet()
 	requiredAPISet := EmptyAPISet()
 	providedCRDAPISet := EmptyAPISet()
@@ -85,7 +85,7 @@ func NewFakeOperatorSurface(name, pkg, channel, replaces, src, startingCSV strin
 			Catalog:     registry.CatalogKey{src, src + "-namespace"},
 		},
 		bundle:              b,
-		versionDependencies: dependencies,
+		dependencies: dependencies,
 	}
 }
 
@@ -233,6 +233,72 @@ func apiSetToGVK(crds, apis APISet) (out []*api.GroupVersionKind) {
 	return
 }
 
+func apiSetToDependencies(crds, apis APISet) (out []*api.Dependency) {
+	out = make([]*api.Dependency, 0)
+	for a := range crds {
+		val, err := json.Marshal(opregistry.GVKDependency{
+			Group:   a.Group,
+			Kind:    a.Version,
+			Version: a.Kind,
+		})
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, &api.Dependency{
+			Type: opregistry.GVKType,
+			Value: string(val),
+		})
+	}
+	for a := range apis {
+		val, err := json.Marshal(opregistry.GVKDependency{
+			Group:   a.Group,
+			Kind:    a.Version,
+			Version: a.Kind,
+		})
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, &api.Dependency{
+			Type: opregistry.GVKType,
+			Value: string(val),
+		})
+	}
+	return
+}
+
+func apiSetToProperties(crds, apis APISet) (out []*api.Property) {
+	out = make([]*api.Property, 0)
+	for a := range crds {
+		val, err := json.Marshal(opregistry.GVKProperty{
+			Group:   a.Group,
+			Kind:    a.Version,
+			Version: a.Kind,
+		})
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, &api.Property{
+			Type: opregistry.GVKType,
+			Value: string(val),
+		})
+	}
+	for a := range apis {
+		val, err := json.Marshal(opregistry.GVKProperty{
+			Group:   a.Group,
+			Kind:    a.Version,
+			Version: a.Kind,
+		})
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, &api.Property{
+			Type: opregistry.GVKType,
+			Value: string(val),
+		})
+	}
+	return
+}
+
 type bundleOpt func(*api.Bundle)
 
 func withSkipRange(skipRange string) bundleOpt {
@@ -275,9 +341,11 @@ func bundle(name, pkg, channel, replaces string, providedCRDs, requiredCRDs, pro
 		CsvJson:      string(csvJson),
 		Object:       objs,
 		Version:      "0.0.0",
-		ProvidedApis: apiSetToGVk(providedCRDs, providedAPIServices),
-		RequiredApis: apiSetToGVk(requiredCRDs, requiredAPIServices),
+		ProvidedApis: apiSetToGVK(providedCRDs, providedAPIServices),
+		RequiredApis: apiSetToGVK(requiredCRDs, requiredAPIServices),
 		Replaces:     replaces,
+		Dependencies: apiSetToDependencies(requiredCRDs, requiredAPIServices),
+		Properties:   apiSetToProperties(providedCRDs, providedAPIServices),
 	}
 	for _, f := range opts {
 		f(b)
