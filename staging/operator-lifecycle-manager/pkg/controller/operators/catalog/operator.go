@@ -133,11 +133,11 @@ func NewOperator(ctx context.Context, kubeconfigPath string, clock utilclock.Clo
 	// Create an OperatorLister
 	lister := operatorlister.NewLister()
 
-	var res resolver.Resolver
+	var res resolver.StepResolver
 	if resolverV2Enable {
-		res = resolver.NewSatStepResolver(lister, crClient, opClient.KubernetesInterface(), operatorNamespace, logger)
+		res = resolver.NewOperatorStepResolver(lister, crClient, opClient.KubernetesInterface(), operatorNamespace, logger)
 	} else {
-		res = resolver.NewOperatorsV1alpha1Resolver(lister, crClient, opClient.KubernetesInterface(), operatorNamespace)
+		res = resolver.NewLegacyResolver(lister, crClient, opClient.KubernetesInterface(), operatorNamespace)
 	}
 
 	// Allocate the new instance of an Operator.

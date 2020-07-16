@@ -22,7 +22,6 @@ import (
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned/fake"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/informers/externalversions"
 	controllerbundle "github.com/operator-framework/operator-lifecycle-manager/pkg/controller/bundle"
-	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry/resolver/solver"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/lib/operatorlister"
 )
@@ -49,7 +48,7 @@ type resolverTest struct {
 	name             string
 	clusterState     []runtime.Object
 	querier          SourceQuerier
-	bundlesByCatalog map[registry.CatalogKey][]*api.Bundle
+	bundlesByCatalog map[CatalogKey][]*api.Bundle
 	out              resolverTestOut
 }
 
@@ -63,7 +62,7 @@ type resolverTestOut struct {
 
 func SharedResolverSpecs() []resolverTest {
 	namespace := "catsrc-namespace"
-	catalog := registry.CatalogKey{"catsrc", namespace}
+	catalog := CatalogKey{"catsrc", namespace}
 	nothing := resolverTestOut{
 		steps:   [][]*v1alpha1.Step{},
 		lookups: []v1alpha1.BundleLookup{},
@@ -75,7 +74,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				newSub(namespace, "a", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
 				},
@@ -94,7 +93,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				newSub(namespace, "a", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil),
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
@@ -116,7 +115,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				newSub(namespace, "a", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 					stripManifests(withBundlePath(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd")),
@@ -161,7 +160,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				newSub(namespace, "a", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&rbacv1.RoleBinding{TypeMeta: metav1.TypeMeta{Kind: "RoleBinding", APIVersion: "rbac.authorization.k8s.io/v1"}, ObjectMeta: metav1.ObjectMeta{Name: "test-rb"}})),
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
@@ -183,7 +182,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				newSub(namespace, "a", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					withBundleObject(bundle("b.v1", "b", "beta", "", Provides1, nil, nil, nil), u(&corev1.Service{TypeMeta: metav1.TypeMeta{Kind: "Service", APIVersion: ""}, ObjectMeta: metav1.ObjectMeta{Name: "test-service"}})),
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
@@ -205,7 +204,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				newSub(namespace, "a", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 				},
@@ -253,7 +252,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 				},
@@ -266,7 +265,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil),
 					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
@@ -287,7 +286,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{catalog: {
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
 				stripManifests(withBundlePath(bundle("a.v2", "a", "alpha", "a.v1", Provides1, nil, nil, nil), "quay.io/test/bundle@sha256:abcd"))},
 			},
 			out: resolverTestOut{
@@ -327,7 +326,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 				},
@@ -346,7 +345,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
 					bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil),
@@ -370,7 +369,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", nil, nil, Provides1, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
 					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, Requires1),
@@ -395,7 +394,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 				newSub(namespace, "b", "beta", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
 					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil),
@@ -419,7 +418,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				newSub(namespace, "b", "beta", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
@@ -441,7 +440,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				newSub(namespace, "b", "beta", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, nil, Provides1, nil),
 					bundle("b.v1", "b", "beta", "", nil, nil, nil, nil),
@@ -466,7 +465,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "b.v1", "b", "alpha", catalog),
 				existingOperator(namespace, "b.v1", "b", "alpha", "", Provides2, Requires1, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v2", "a", "alpha", "a.v1", Provides3, Requires4, nil, nil),
 					bundle("b.v2", "b", "alpha", "b.v1", Provides4, Requires3, nil, nil),
@@ -492,7 +491,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "b.v1", "b", "alpha", catalog),
 				existingOperator(namespace, "b.v1", "b", "alpha", "", nil, Requires1, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil),
 					bundle("b.v2", "b", "alpha", "b.v1", Provides1, nil, nil, nil),
@@ -514,7 +513,7 @@ func SharedResolverSpecs() []resolverTest {
 			clusterState: []runtime.Object{
 				newSub(namespace, "b", "alpha", catalog),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 					bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil),
@@ -538,7 +537,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{catalog: {
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
 				bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
 			}},
 			out: resolverTestOut{
@@ -568,7 +567,7 @@ func SharedResolverSpecs() []resolverTest {
 				existingOperator(namespace, "a.v1", "a", "alpha", "", nil, Requires1, nil, nil),
 				existingOperator(namespace, "b.v1", "b", "beta", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{
 				catalog: {
 					bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
 					bundle("a.v2", "a", "alpha", "a.v1", nil, Requires1, nil, nil),
@@ -590,9 +589,9 @@ func SharedResolverSpecs() []resolverTest {
 	}
 }
 
-func TestResolver(t *testing.T) {
+func TestStepResolver(t *testing.T) {
 	namespace := "catsrc-namespace"
-	catalog := registry.CatalogKey{"catsrc", namespace}
+	catalog := CatalogKey{"catsrc", namespace}
 
 	tests := append(SharedResolverSpecs(),
 		resolverTest{
@@ -601,7 +600,7 @@ func TestResolver(t *testing.T) {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{catalog: {
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
 				bundle("a.v2", "a", "alpha", "", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
 				bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
 				bundle("a.v4", "a", "alpha", "a.v3", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0 !0.0.0")),
@@ -620,7 +619,7 @@ func TestResolver(t *testing.T) {
 			clusterState: []runtime.Object{
 				newSub(namespace, "a", "alpha", catalog, withStartingCSV("a.v2")),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{catalog: {
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
 				bundle("a.v1", "a", "alpha", "", nil, nil, nil, nil),
 				bundle("a.v2", "a", "alpha", "a.v1", nil, nil, nil, nil),
 				bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil, withVersion("1.0.0"), withSkipRange("< 1.0.0")),
@@ -640,7 +639,7 @@ func TestResolver(t *testing.T) {
 				existingSub(namespace, "a.v1", "a", "alpha", catalog),
 				existingOperator(namespace, "a.v1", "a", "alpha", "", Provides1, nil, nil, nil),
 			},
-			bundlesByCatalog: map[registry.CatalogKey][]*api.Bundle{catalog: {
+			bundlesByCatalog: map[CatalogKey][]*api.Bundle{catalog: {
 				bundle("a.v2", "a", "alpha", "", nil, nil, nil, nil, withVersion("1.0.0"), withSkips([]string{"a.v1"})),
 				bundle("a.v3", "a", "alpha", "a.v2", nil, nil, nil, nil, withVersion("1.0.0"), withSkips([]string{"a.v1"})),
 			}},
@@ -683,7 +682,7 @@ func TestResolver(t *testing.T) {
 			}
 			stubCache := &stubOperatorCacheProvider{
 				noc: &NamespacedOperatorCache{
-					snapshots: map[registry.CatalogKey]*CatalogSnapshot{
+					snapshots: map[CatalogKey]*CatalogSnapshot{
 						catalog: stubSnapshot,
 					},
 				},
@@ -691,7 +690,7 @@ func TestResolver(t *testing.T) {
 			satresolver := &SatResolver{
 				cache: stubCache,
 			}
-			resolver := NewOperatorStepResolver(lister, clientFake, kClientFake, "", nil, logrus.New())
+			resolver := NewOperatorStepResolver(lister, clientFake, kClientFake, "", logrus.New())
 			resolver.satResolver = satresolver
 
 			steps, lookups, subs, err := resolver.ResolveSteps(namespace, nil)
@@ -719,7 +718,7 @@ func (stub *stubOperatorCacheProvider) Namespaced(namespaces ...string) MultiCat
 
 func TestNamespaceResolverRBAC(t *testing.T) {
 	namespace := "catsrc-namespace"
-	catalog := registry.CatalogKey{"catsrc", namespace}
+	catalog := CatalogKey{"catsrc", namespace}
 
 	simplePermissions := []v1alpha1.StrategyDeploymentPermissions{
 		{
@@ -778,7 +777,7 @@ func TestNamespaceResolverRBAC(t *testing.T) {
 			lister.OperatorsV1alpha1().RegisterClusterServiceVersionLister(namespace, informerFactory.Operators().V1alpha1().ClusterServiceVersions().Lister())
 
 			resolver := NewLegacyResolver(lister, clientFake, kClientFake, "")
-			querier := NewFakeSourceQuerier(map[registry.CatalogKey][]*api.Bundle{catalog: tt.bundlesInCatalog})
+			querier := NewFakeSourceQuerier(map[CatalogKey][]*api.Bundle{catalog: tt.bundlesInCatalog})
 			steps, _, subs, err := resolver.ResolveSteps(namespace, querier)
 			require.Equal(t, tt.out.err, err)
 			RequireStepsEqual(t, expectedSteps, steps)
@@ -819,7 +818,7 @@ func withStartingCSV(name string) subOption {
 	}
 }
 
-func newSub(namespace, pkg, channel string, catalog registry.CatalogKey, option ...subOption) *v1alpha1.Subscription {
+func newSub(namespace, pkg, channel string, catalog CatalogKey, option ...subOption) *v1alpha1.Subscription {
 	s := &v1alpha1.Subscription{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pkg + "-" + channel,
@@ -838,7 +837,7 @@ func newSub(namespace, pkg, channel string, catalog registry.CatalogKey, option 
 	return s
 }
 
-func updatedSub(namespace, currentOperatorName, installedOperatorName, pkg, channel string, catalog registry.CatalogKey, option ...subOption) *v1alpha1.Subscription {
+func updatedSub(namespace, currentOperatorName, installedOperatorName, pkg, channel string, catalog CatalogKey, option ...subOption) *v1alpha1.Subscription {
 	s := &v1alpha1.Subscription{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pkg + "-" + channel,
@@ -861,7 +860,7 @@ func updatedSub(namespace, currentOperatorName, installedOperatorName, pkg, chan
 	return s
 }
 
-func existingSub(namespace, operatorName, pkg, channel string, catalog registry.CatalogKey) *v1alpha1.Subscription {
+func existingSub(namespace, operatorName, pkg, channel string, catalog CatalogKey) *v1alpha1.Subscription {
 	return &v1alpha1.Subscription{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pkg + "-" + channel,
@@ -890,7 +889,7 @@ func existingOperator(namespace, operatorName, pkg, channel, replaces string, pr
 	return csv
 }
 
-func bundleSteps(bundle *api.Bundle, ns, replaces string, catalog registry.CatalogKey) []*v1alpha1.Step {
+func bundleSteps(bundle *api.Bundle, ns, replaces string, catalog CatalogKey) []*v1alpha1.Step {
 	if replaces == "" {
 		csv, _ := V1alpha1CSVFromBundle(bundle)
 		replaces = csv.Spec.Replaces
@@ -911,7 +910,7 @@ func bundleSteps(bundle *api.Bundle, ns, replaces string, catalog registry.Catal
 	return steps
 }
 
-func subSteps(namespace, operatorName, pkgName, channelName string, catalog registry.CatalogKey) []*v1alpha1.Step {
+func subSteps(namespace, operatorName, pkgName, channelName string, catalog CatalogKey) []*v1alpha1.Step {
 	sub := &v1alpha1.Subscription{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      strings.Join([]string{pkgName, channelName, catalog.Name, catalog.Namespace}, "-"),
