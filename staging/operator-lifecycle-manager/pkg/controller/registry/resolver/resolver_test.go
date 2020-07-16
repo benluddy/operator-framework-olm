@@ -1,24 +1,21 @@
 package resolver
 
 import (
-	"github.com/sirupsen/logrus"
 	"strings"
 	"testing"
 
-	"github.com/blang/semver"
-	"github.com/stretchr/testify/assert"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-registry/pkg/api"
 	opregistry "github.com/operator-framework/operator-registry/pkg/registry"
 
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned/fake"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/informers/externalversions"
 	controllerbundle "github.com/operator-framework/operator-lifecycle-manager/pkg/controller/bundle"
-	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry/resolver/solve"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry/resolver/solver"
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/lib/operatorlister"
 )
 
@@ -39,7 +36,7 @@ type resolverTestOut struct {
 	lookups     []v1alpha1.BundleLookup
 	subs        []*v1alpha1.Subscription
 	err         error
-	solverError solve.NotSatisfiable
+	solverError solver.NotSatisfiable
 }
 
 func SharedResolverSpecs() []resolverTest {
@@ -222,35 +219,35 @@ func TestSolveOperators_FindLatestVersionWithDependencies(t *testing.T) {
 				steps:   [][]*v1alpha1.Step{},
 				lookups: []v1alpha1.BundleLookup{},
 				subs:    []*v1alpha1.Subscription{},
-				solverError: solve.NotSatisfiable([]solve.AppliedConstraint{
+				solverError: solver.NotSatisfiable([]solver.AppliedConstraint{
 					{
 						Installable: &SubscriptionInstallable{
 							identifier: "a",
-							constraints: []solve.Constraint{
-								solve.Mandatory(),
-								solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
-								solve.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
+							constraints: []solver.Constraint{
+								solver.Mandatory(),
+								solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+								solver.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
 							},
 						},
-						Constraint: solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+						Constraint: solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
 					},
 					{
 						Installable: &BundleInstallable{
 							identifier:  "catsrc/catsrc-namespace/alpha/a.v1",
-							constraints: []solve.Constraint{solve.Prohibited()},
+							constraints: []solver.Constraint{solver.Prohibited()},
 						},
-						Constraint: solve.Prohibited(),
+						Constraint: solver.Prohibited(),
 					},
 					{
 						Installable: &SubscriptionInstallable{
 							identifier: "a",
-							constraints: []solve.Constraint{
-								solve.Mandatory(),
-								solve.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
-								solve.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
+							constraints: []solver.Constraint{
+								solver.Mandatory(),
+								solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+								solver.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
 							},
 						},
-						Constraint: solve.Mandatory(),
+						Constraint: solver.Mandatory(),
 					},
 				}),
 			},
@@ -820,7 +817,7 @@ func TestResolverNew(t *testing.T) {
 			} else {
 				// the solver outputs useful information on a failed resolution, which is different from the old resolver
 				require.NotNil(t, err)
-				require.ElementsMatch(t, tt.out.solverError, err.(solve.NotSatisfiable))
+				require.ElementsMatch(t, tt.out.solverError, err.(solver.NotSatisfiable))
 			}
 			RequireStepsEqual(t, expectedSteps, steps)
 			require.ElementsMatch(t, tt.out.lookups, lookups)
