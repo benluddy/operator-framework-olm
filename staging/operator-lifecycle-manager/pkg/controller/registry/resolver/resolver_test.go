@@ -860,7 +860,6 @@ func TestSolveOperators_WithGVKDependencies(t *testing.T) {
 }
 
 func TestSolveOperators_WithNestedGVKDependencies(t *testing.T) {
-	t.Skip("this test won't pass until preferred catalog is implemented")
 	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
 	Provides := APISet
 
@@ -916,6 +915,7 @@ func TestSolveOperators_WithNestedGVKDependencies(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log: logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
