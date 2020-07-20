@@ -29,6 +29,7 @@ var timeNow = func() metav1.Time { return metav1.NewTime(time.Now().UTC()) }
 
 type StepResolver interface {
 	ResolveSteps(namespace string, sourceQuerier SourceQuerier) ([]*v1alpha1.Step, []v1alpha1.BundleLookup, []*v1alpha1.Subscription, error)
+	Expire(key registry.CatalogKey)
 }
 
 
@@ -54,6 +55,10 @@ func NewOperatorStepResolver(lister operatorlister.OperatorLister, client versio
 		globalCatalogNamespace: globalCatalogNamespace,
 		satResolver:            NewDefaultSatResolver(NewDefaultRegistryClientProvider(client), log),
 	}
+}
+
+func (r *OperatorStepResolver) Expire(key registry.CatalogKey) {
+	r.satResolver.cache.Expire(key)
 }
 
 func (r *OperatorStepResolver) ResolveSteps(namespace string, _ SourceQuerier) ([]*v1alpha1.Step, []v1alpha1.BundleLookup, []*v1alpha1.Subscription, error) {

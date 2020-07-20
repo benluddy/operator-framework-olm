@@ -724,6 +724,10 @@ func (stub *stubOperatorCacheProvider) Namespaced(namespaces ...string) MultiCat
 	return stub.noc
 }
 
+func (stub *stubOperatorCacheProvider) Expire(key registry.CatalogKey) {
+	return
+}
+
 func TestNamespaceResolverRBAC(t *testing.T) {
 	namespace := "catsrc-namespace"
 	catalog := CatalogKey{"catsrc", namespace}
