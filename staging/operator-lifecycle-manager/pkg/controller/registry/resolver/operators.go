@@ -211,17 +211,18 @@ func (s APIMultiOwnerSet) PopAPIRequirers() OperatorSet {
 }
 
 type OperatorSourceInfo struct {
-	Package     string
-	Channel     string
-	StartingCSV string
-	Catalog     registry.CatalogKey
+	Package        string
+	Channel        string
+	StartingCSV    string
+	Catalog        registry.CatalogKey
+	DefaultChannel bool
 }
 
 func (i *OperatorSourceInfo) String() string {
 	return fmt.Sprintf("%s/%s in %s/%s", i.Package, i.Channel, i.Catalog.Name, i.Catalog.Namespace)
 }
 
-var ExistingOperator = OperatorSourceInfo{"", "", "", registry.CatalogKey{"", ""}}
+var ExistingOperator = OperatorSourceInfo{"", "", "", registry.CatalogKey{"", ""}, false}
 
 // OperatorSurface describes the API surfaces provided and required by an Operator.
 type OperatorSurface interface {
@@ -237,19 +238,19 @@ type OperatorSurface interface {
 }
 
 type Operator struct {
-	name                string
-	replaces            string
-	providedAPIs        APISet
-	requiredAPIs        APISet
-	version             *semver.Version
-	bundle              *api.Bundle
-	sourceInfo          *OperatorSourceInfo
-	dependencies        []*api.Dependency
+	name         string
+	replaces     string
+	providedAPIs APISet
+	requiredAPIs APISet
+	version      *semver.Version
+	bundle       *api.Bundle
+	sourceInfo   *OperatorSourceInfo
+	dependencies []*api.Dependency
 }
 
 var _ OperatorSurface = &Operator{}
 
-func NewOperatorFromBundle(bundle *api.Bundle, startingCSV string, sourceKey registry.CatalogKey) (*Operator, error) {
+func NewOperatorFromBundle(bundle *api.Bundle, startingCSV string, sourceKey registry.CatalogKey, defaultChannel string) (*Operator, error) {
 	parsedVersion, err := semver.ParseTolerant(bundle.Version)
 	version := &parsedVersion
 	if err != nil {
@@ -269,6 +270,7 @@ func NewOperatorFromBundle(bundle *api.Bundle, startingCSV string, sourceKey reg
 		StartingCSV: startingCSV,
 		Catalog:     sourceKey,
 	}
+	sourceInfo.DefaultChannel = sourceInfo.Channel == defaultChannel
 
 	// legacy support - if the grpc api doesn't contain the information we need, fallback to csv parsing
 	if len(required) == 0 && len(provided) == 0 {
@@ -296,14 +298,14 @@ func NewOperatorFromBundle(bundle *api.Bundle, startingCSV string, sourceKey reg
 	}
 
 	return &Operator{
-		name:                bundle.CsvName,
-		replaces:            bundle.Replaces,
-		version:             version,
-		providedAPIs:        provided,
-		requiredAPIs:        required,
-		bundle:              bundle,
-		sourceInfo:          sourceInfo,
-		dependencies:        bundle.Dependencies,
+		name:         bundle.CsvName,
+		replaces:     bundle.Replaces,
+		version:      version,
+		providedAPIs: provided,
+		requiredAPIs: required,
+		bundle:       bundle,
+		sourceInfo:   sourceInfo,
+		dependencies: bundle.Dependencies,
 	}, nil
 }
 
@@ -404,8 +406,8 @@ func PredicateForDependency(dependency *api.Dependency) (OperatorPredicate, erro
 	return predicates[dependency.Type](dependency.Value)
 }
 
-var predicates = map[string]func(string) (OperatorPredicate, error) {
-	opregistry.GVKType: predicateForGVKDependency,
+var predicates = map[string]func(string) (OperatorPredicate, error){
+	opregistry.GVKType:     predicateForGVKDependency,
 	opregistry.PackageType: predicateForPackageDependency,
 }
 
@@ -433,4 +435,3 @@ func predicateForPackageDependency(value string) (OperatorPredicate, error) {
 
 	return And(WithPackage(pkg.PackageName), WithVersionInRange(ver)), nil
 }
-
