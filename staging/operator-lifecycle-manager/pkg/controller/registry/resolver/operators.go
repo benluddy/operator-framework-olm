@@ -94,8 +94,6 @@ func (s APISet) String() string {
 	return strings.Join(gvkStrs, ",")
 }
 
-// TODO: Generalize set logic and make an abstraction for sets to implemement to feed into it.
-
 // Union returns the union of the APISet and the given list of APISets
 func (s APISet) Union(sets ...APISet) APISet {
 	union := make(APISet)
@@ -222,7 +220,8 @@ func (i *OperatorSourceInfo) String() string {
 	return fmt.Sprintf("%s/%s in %s/%s", i.Package, i.Channel, i.Catalog.Name, i.Catalog.Namespace)
 }
 
-var ExistingOperator = OperatorSourceInfo{"", "", "", registry.CatalogKey{"", ""}, false}
+var NoCatalog = registry.CatalogKey{Name: "", Namespace: ""}
+var ExistingOperator = OperatorSourceInfo{Package: "", Channel: "", StartingCSV: "", Catalog: NoCatalog, DefaultChannel: false}
 
 // OperatorSurface describes the API surfaces provided and required by an Operator.
 type OperatorSurface interface {
@@ -235,6 +234,7 @@ type OperatorSurface interface {
 	Bundle() *api.Bundle
 	Inline() bool
 	Dependencies() []*api.Dependency
+	Properties() []*api.Property
 }
 
 type Operator struct {
@@ -246,6 +246,7 @@ type Operator struct {
 	bundle       *api.Bundle
 	sourceInfo   *OperatorSourceInfo
 	dependencies []*api.Dependency
+	properties   []*api.Property
 }
 
 var _ OperatorSurface = &Operator{}
@@ -273,7 +274,7 @@ func NewOperatorFromBundle(bundle *api.Bundle, startingCSV string, sourceKey reg
 	sourceInfo.DefaultChannel = sourceInfo.Channel == defaultChannel
 
 	// legacy support - if the grpc api doesn't contain the information we need, fallback to csv parsing
-	if len(required) == 0 && len(provided) == 0 {
+	if len(required) == 0 && len(provided) == 0 && len(bundle.Properties) == 0 && len(bundle.Dependencies) == 0 {
 		// fallback to csv parsing
 		if bundle.CsvJson == "" {
 			if bundle.GetBundlePath() != "" {
@@ -297,6 +298,22 @@ func NewOperatorFromBundle(bundle *api.Bundle, startingCSV string, sourceKey reg
 		return op, nil
 	}
 
+	// legacy support - if the api doesn't contain properties/dependencies, build them from required/provided apis
+	properties := bundle.Properties
+	if properties == nil || len(properties) == 0{
+		properties, err = apisToProperties(provided)
+		if err != nil {
+			return nil, err
+		}
+	}
+	dependencies := bundle.Dependencies
+	if dependencies == nil || len(dependencies) == 0 {
+		dependencies, err = apisToDependencies(required)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &Operator{
 		name:         bundle.CsvName,
 		replaces:     bundle.Replaces,
@@ -305,7 +322,8 @@ func NewOperatorFromBundle(bundle *api.Bundle, startingCSV string, sourceKey reg
 		requiredAPIs: required,
 		bundle:       bundle,
 		sourceInfo:   sourceInfo,
-		dependencies: bundle.Dependencies,
+		dependencies: dependencies,
+		properties:   properties,
 	}, nil
 }
 
@@ -334,12 +352,24 @@ func NewOperatorFromV1Alpha1CSV(csv *v1alpha1.ClusterServiceVersion) (*Operator,
 		requiredAPIs[opregistry.APIKey{Group: api.Group, Version: api.Version, Kind: api.Kind, Plural: api.Name}] = struct{}{}
 	}
 
+	dependencies, err := apisToDependencies(requiredAPIs)
+	if err != nil {
+		return nil, err
+	}
+
+	properties, err := apisToProperties(providedAPIs)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Operator{
 		name:         csv.GetName(),
 		version:      &csv.Spec.Version.Version,
 		providedAPIs: providedAPIs,
 		requiredAPIs: requiredAPIs,
 		sourceInfo:   &ExistingOperator,
+		dependencies: dependencies,
+		properties:   properties,
 	}, nil
 }
 
@@ -384,7 +414,11 @@ func (o *Operator) Inline() bool {
 }
 
 func (o *Operator) Dependencies() []*api.Dependency {
-	return o.bundle.Dependencies
+	return o.dependencies
+}
+
+func (o *Operator) Properties() []*api.Property {
+	return o.properties
 }
 
 func (o *Operator) DependencyPredicates() (predicates []OperatorPredicate, err error) {
@@ -434,4 +468,51 @@ func predicateForPackageDependency(value string) (OperatorPredicate, error) {
 	}
 
 	return And(WithPackage(pkg.PackageName), WithVersionInRange(ver)), nil
+}
+
+func apisToDependencies(apis APISet) (out []*api.Dependency, err error) {
+	if len(apis) == 0 {
+		return
+	}
+	out = make([]*api.Dependency, 0)
+	for a := range apis {
+		val, err := json.Marshal(opregistry.GVKDependency{
+			Group:   a.Group,
+			Kind:    a.Kind,
+			Version: a.Version,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &api.Dependency{
+			Type:  opregistry.GVKType,
+			Value: string(val),
+		})
+	}
+	if len(out) > 0 {
+		return
+	}
+	return nil, nil
+}
+
+func apisToProperties(apis APISet) (out []*api.Property, err error) {
+	out = make([]*api.Property, 0)
+	for a := range apis {
+		val, err := json.Marshal(opregistry.GVKProperty{
+			Group:   a.Group,
+			Kind:    a.Kind,
+			Version: a.Version,
+		})
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, &api.Property{
+			Type:  opregistry.GVKType,
+			Value: string(val),
+		})
+	}
+	if len(out) > 0 {
+		return
+	}
+	return nil, nil
 }
