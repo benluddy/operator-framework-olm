@@ -92,7 +92,8 @@ func NewOperatorCache(rcp RegistryClientProvider) *OperatorCache {
 
 type NamespacedOperatorCache struct {
 	namespaces []string
-	snapshots map[CatalogKey]*CatalogSnapshot
+	existing  *registry.CatalogKey
+	snapshots  map[registry.CatalogKey]*CatalogSnapshot
 }
 
 func (c *OperatorCache) Expire(catalog registry.CatalogKey) {
@@ -242,16 +243,27 @@ func (c *NamespacedOperatorCache) Catalog(k CatalogKey) OperatorFinder {
 
 func (c *NamespacedOperatorCache) FindPreferred(preferred *registry.CatalogKey, p ...OperatorPredicate) []*Operator {
 	var result []*Operator
-	if preferred != nil && preferred.IsEmpty() {
+	if preferred != nil && preferred.Empty() {
 		preferred = nil
 	}
-	sorted := NewSortableSnapshots(preferred, c.namespaces, c.snapshots)
+	sorted := NewSortableSnapshots(c.existing, preferred, c.namespaces, c.snapshots)
 	sort.Sort(sorted)
 	for _, snapshot := range sorted.snapshots {
 		result = append(result, snapshot.Find(p...)...)
 	}
 	return result
 }
+
+func (c *NamespacedOperatorCache) WithExistingOperators(snapshot *CatalogSnapshot) MultiCatalogOperatorFinder {
+	o := &NamespacedOperatorCache{
+		namespaces: c.namespaces,
+		existing:   &snapshot.key,
+		snapshots:  c.snapshots,
+	}
+	o.snapshots[snapshot.key] = snapshot
+	return o
+}
+
 
 func (c *NamespacedOperatorCache) Find(p ...OperatorPredicate) []*Operator {
 	return c.FindPreferred(nil, p...)
@@ -274,14 +286,26 @@ func (s *CatalogSnapshot) Expired(at time.Time) bool {
 	return !at.Before(s.expiry)
 }
 
+// NewRunningOperatorSnapshot creates a CatalogSnapshot that represents a set of existing installed operators
+// in the cluster.
+func NewRunningOperatorSnapshot(logger logrus.FieldLogger, key registry.CatalogKey, o []*Operator) *CatalogSnapshot {
+	return &CatalogSnapshot{
+		logger: logger,
+		key: key,
+		operators: o,
+	}
+}
+
 type SortableSnapshots struct {
 	snapshots []*CatalogSnapshot
 	namespaces map[string]int
 	preferred  *registry.CatalogKey
+	existing   *registry.CatalogKey
 }
 
-func NewSortableSnapshots(preferred *registry.CatalogKey, namespaces []string, snapshots map[registry.CatalogKey]*CatalogSnapshot) SortableSnapshots {
+func NewSortableSnapshots(existing, preferred *registry.CatalogKey, namespaces []string, snapshots map[registry.CatalogKey]*CatalogSnapshot) SortableSnapshots {
 	sorted := SortableSnapshots{
+		existing:   existing,
 		preferred:  preferred,
 		snapshots:  make([]*CatalogSnapshot, 0),
 		namespaces: make(map[string]int, 0),
@@ -305,7 +329,19 @@ func (s SortableSnapshots) Len() int {
 // Less reports whether the element with
 // index i should sort before the element with index j.
 func (s SortableSnapshots) Less(i, j int) bool {
-	// preferred catalog is less than all others
+	// existing operators are preferred over catalog operators
+	if s.existing != nil &&
+		s.snapshots[i].key.Name == s.existing.Name &&
+		s.snapshots[i].key.Namespace == s.existing.Namespace {
+		return true
+	}
+	if s.existing != nil &&
+		s.snapshots[j].key.Name == s.existing.Name &&
+		s.snapshots[j].key.Namespace == s.existing.Namespace {
+		return false
+	}
+
+	// preferred catalog is less than all other catalogs
 	if s.preferred != nil &&
 		s.snapshots[i].key.Name == s.preferred.Name &&
 		s.snapshots[i].key.Namespace == s.preferred.Namespace {
@@ -316,6 +352,8 @@ func (s SortableSnapshots) Less(i, j int) bool {
 		s.snapshots[j].key.Namespace == s.preferred.Namespace {
 		return false
 	}
+
+	// the rest are sorted first in namespace preference order, then by name
 	if s.snapshots[i].key.Namespace != s.snapshots[j].key.Namespace {
 		return s.namespaces[s.snapshots[i].key.Namespace] <  s.namespaces[s.snapshots[j].key.Namespace]
 	}
@@ -342,6 +380,7 @@ type OperatorFinder interface {
 type MultiCatalogOperatorFinder interface {
 	Catalog(registry.CatalogKey) OperatorFinder
 	FindPreferred(*registry.CatalogKey, ...OperatorPredicate) []*Operator
+	WithExistingOperators(*CatalogSnapshot) MultiCatalogOperatorFinder
 	OperatorFinder
 }
 
@@ -359,6 +398,13 @@ func WithCSVName(name string) OperatorPredicate {
 
 func WithChannel(channel string) OperatorPredicate {
 	return func(o *Operator) bool {
+		// all operators match the empty channel
+		if channel == "" {
+			return true
+		}
+		if o.bundle == nil {
+			return false
+		}
 		return o.bundle.ChannelName == channel
 	}
 }
@@ -377,8 +423,8 @@ func WithVersionInRange(r semver.Range) OperatorPredicate {
 
 func ProvidingAPI(api registry.APIKey) OperatorPredicate {
 	return func(o *Operator) bool {
-		for _, p := range o.bundle.Properties {
-			if p.Type != registry.GVKType {
+		for _, p := range o.Properties() {
+			if p.Type != opregistry.GVKType {
 				continue
 			}
 			var prop registry.GVKProperty
