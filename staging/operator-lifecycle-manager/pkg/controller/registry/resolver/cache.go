@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/blang/semver"
+	"github.com/operator-framework/operator-registry/pkg/api"
+	"github.com/operator-framework/operator-registry/pkg/client"
+	opregistry "github.com/operator-framework/operator-registry/pkg/registry"
 	"github.com/sirupsen/logrus"
 
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry"
-	"github.com/operator-framework/operator-registry/pkg/client"
-	"github.com/operator-framework/operator-registry/pkg/registry"
 )
 
 type ClientProvider interface {
@@ -92,7 +93,7 @@ func NewOperatorCache(rcp RegistryClientProvider) *OperatorCache {
 
 type NamespacedOperatorCache struct {
 	namespaces []string
-	existing  *registry.CatalogKey
+	existing   *registry.CatalogKey
 	snapshots  map[registry.CatalogKey]*CatalogSnapshot
 }
 
@@ -226,6 +227,7 @@ func (c *OperatorCache) populate(ctx context.Context, snapshot *CatalogSnapshot,
 		o.providedAPIs = o.ProvidedAPIs().StripPlural()
 		o.requiredAPIs = o.RequiredAPIs().StripPlural()
 		o.replaces = b.Replaces
+		ensurePackageProperty(o, b.PackageName, b.Version)
 		operators = append(operators, o)
 	}
 	if err := it.Error(); err != nil {
@@ -234,7 +236,27 @@ func (c *OperatorCache) populate(ctx context.Context, snapshot *CatalogSnapshot,
 	snapshot.operators = operators
 }
 
-func (c *NamespacedOperatorCache) Catalog(k CatalogKey) OperatorFinder {
+func ensurePackageProperty(o *Operator, name, version string) {
+	for _, p := range o.Properties() {
+		if p.Type == opregistry.PackageType {
+			return
+		}
+	}
+	prop := opregistry.PackageProperty{
+		PackageName: name,
+		Version:     version,
+	}
+	byte, err := json.Marshal(prop)
+	if err != nil {
+		return
+	}
+	o.properties = append(o.properties, &api.Property{
+		Type:  opregistry.PackageType,
+		Value: string(byte),
+	})
+}
+
+func (c *NamespacedOperatorCache) Catalog(k registry.CatalogKey) OperatorFinder {
 	if snapshot, ok := c.snapshots[k]; ok {
 		return snapshot
 	}
@@ -264,7 +286,6 @@ func (c *NamespacedOperatorCache) WithExistingOperators(snapshot *CatalogSnapsho
 	return o
 }
 
-
 func (c *NamespacedOperatorCache) Find(p ...OperatorPredicate) []*Operator {
 	return c.FindPreferred(nil, p...)
 }
@@ -290,8 +311,8 @@ func (s *CatalogSnapshot) Expired(at time.Time) bool {
 // in the cluster.
 func NewRunningOperatorSnapshot(logger logrus.FieldLogger, key registry.CatalogKey, o []*Operator) *CatalogSnapshot {
 	return &CatalogSnapshot{
-		logger: logger,
-		key: key,
+		logger:    logger,
+		key:       key,
 		operators: o,
 	}
 }
