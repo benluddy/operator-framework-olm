@@ -45,6 +45,7 @@ func TestSolveOperators(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
@@ -91,6 +92,7 @@ func TestSolveOperators_MultipleChannels(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
@@ -270,6 +272,7 @@ func TestSolveOperators_FindLatestVersionWithDependencies_LargeCatalogSet(t *tes
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
@@ -737,6 +740,7 @@ func TestSolveOperators_FindLatestVersionWithNestedDependencies(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
@@ -796,6 +800,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
@@ -853,6 +858,7 @@ func TestSolveOperators_WithGVKDependencies(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
@@ -890,7 +896,7 @@ func TestSolveOperators_WithLabelDependencies(t *testing.T) {
 		},
 	}
 
-	operatorBv1 := genOperator("packageB.v1", "1.0.0", "", "packageB", "beta", "community", "olm", nil, nil, nil, "")
+	operatorBv1 := genOperator("packageB.v1", "1.0.0", "", "packageB", "beta", "community", "olm", nil, nil, nil, "", false)
 	for _, p := range props {
 		operatorBv1.properties = append(operatorBv1.properties, p)
 	}
@@ -906,7 +912,7 @@ func TestSolveOperators_WithLabelDependencies(t *testing.T) {
 					Name:      "community",
 				},
 				operators: []*Operator{
-					genOperator("packageA", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, deps, ""),
+					genOperator("packageA", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, deps, "", false),
 					operatorBv1,
 				},
 			},
@@ -921,7 +927,7 @@ func TestSolveOperators_WithLabelDependencies(t *testing.T) {
 	assert.Equal(t, 2, len(operators))
 
 	expected := OperatorSet{
-		"packageA":    genOperator("packageA", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, deps, ""),
+		"packageA":    genOperator("packageA", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, deps, "", false),
 		"packageB.v1": operatorBv1,
 	}
 	for k := range expected {
@@ -955,8 +961,8 @@ func TestSolveOperators_WithUnsatisfiableLabelDependencies(t *testing.T) {
 					Name:      "community",
 				},
 				operators: []*Operator{
-					genOperator("packageA", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, deps, ""),
-					genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "community", "olm", nil, nil, nil, ""),
+					genOperator("packageA", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, deps, "", false),
+					genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "community", "olm", nil, nil, nil, "", false),
 				},
 			},
 		},
@@ -1118,6 +1124,7 @@ func TestSolveOperators_IgnoreUnsatisfiableDependencies(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
@@ -1167,6 +1174,7 @@ func TestSolveOperators_PreferCatalogInSameNamespace(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{namespace}, csvs, subs)
@@ -1205,6 +1213,7 @@ func TestSolveOperators_ResolveOnlyInCachedNamespaces(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{namespace}, csvs, subs)
@@ -1242,6 +1251,7 @@ func TestSolveOperators_PreferDefaultChannelInResolution(t *testing.T) {
 
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{namespace}, csvs, subs)
@@ -1282,6 +1292,7 @@ func TestSolveOperators_PreferDefaultChannelInResolutionForTransitiveDependencie
 
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{namespace}, csvs, subs)
@@ -1626,6 +1637,7 @@ func TestSolveOperators_WithoutDeprecated(t *testing.T) {
 	}
 	satResolver := SatResolver{
 		cache: getFakeOperatorCache(fakeNamespacedOperatorCache),
+		log:   logrus.New(),
 	}
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
