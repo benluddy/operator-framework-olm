@@ -10,7 +10,10 @@ import (
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-registry/pkg/api"
-	"github.com/operator-framework/operator-registry/pkg/registry"
+	opregistry "github.com/operator-framework/operator-registry/pkg/registry"
+
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/registry/resolver/solver"
 )
 
 func TestSolveOperators(t *testing.T) {
@@ -667,9 +670,6 @@ func TestSolveOperators_PreferCatalogInSameNamespace(t *testing.T) {
 		"packageC.v1.0.1": genOperator("packageC.v1.0.1", "1.0.1", "packageC.v1.0.0", "packageC", "alpha", "community", "olm", nil, nil, nil, "", false),
 		"packageD.v1.0.1": genOperator("packageD.v1.0.1", "1.0.1", "packageD.v1.0.0", "packageD", "alpha", "community", "olm", nil, nil, nil, "", false),
 	}
-	for _, o := range operators {
-		t.Logf("%#v", o)
-	}
 	for k := range expected {
 		require.NotNil(t, operators[k])
 		assert.EqualValues(t, k, operators[k].Identifier())
@@ -936,7 +936,7 @@ func TestSolveOperators_WithDependencies(t *testing.T) {
 					Name:      "community",
 				},
 				operators: []*Operator{
-					genOperator("packageA.v1.0.1", "0.0.1", "packageA.v1", "packageA", "alpha", "community", "olm", nil, nil, nil, "", false),
+					genOperator("packageA.v1.0.1", "1.0.1", "packageA.v1", "packageA", "alpha", "community", "olm", nil, nil, nil, "", false),
 					genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps, "", false),
 					genOperator("packageC.v1", "0.1.0", "", "packageC", "alpha", "community", "olm", nil, nil, nil, "", false),
 				},
@@ -968,13 +968,15 @@ func TestSolveOperators_WithGVKDependencies(t *testing.T) {
 	Provides := APISet
 
 	namespace := "olm"
-	catalog := registry.CatalogKey{"community", namespace}
+	community := registry.CatalogKey{"community", namespace}
 
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
+	csvs := []*v1alpha1.ClusterServiceVersion{
+		existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", nil, nil, nil, nil),
+	}
+	subs := []*v1alpha1.Subscription{
+		existingSub(namespace, "packageA.v1", "packageA", "alpha", community),
+		newSub(namespace, "packageB", "alpha", community),
+	}
 
 	deps := []*api.Dependency{
 		{
@@ -985,14 +987,8 @@ func TestSolveOperators_WithGVKDependencies(t *testing.T) {
 
 	fakeNamespacedOperatorCache := NamespacedOperatorCache{
 		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: {
-				key: registry.CatalogKey{
-					Namespace: "olm",
-					Name:      "community",
-				},
+			community: {
+				key: community,
 				operators: []*Operator{
 					genOperator("packageA.v1", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, nil, "", false),
 					genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "community", "olm", Provides, nil, deps, "", false),
@@ -1008,12 +1004,12 @@ func TestSolveOperators_WithGVKDependencies(t *testing.T) {
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(operators))
 
 	expected := OperatorSet{
 		"packageB.v1": genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "community", "olm", Provides, nil, deps, "", false),
 		"packageC.v1": genOperator("packageC.v1", "0.1.0", "", "packageC", "alpha", "community", "olm", nil, Provides, nil, "", false),
 	}
+	assert.Equal(t, len(expected), len(operators))
 	for k := range expected {
 		require.NotNil(t, operators[k])
 		assert.EqualValues(t, k, operators[k].Identifier())
@@ -1210,17 +1206,17 @@ func TestSolveOperators_WithNestedGVKDependencies(t *testing.T) {
 }
 
 func TestSolveOperators_IgnoreUnsatisfiableDependencies(t *testing.T) {
-	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
-	Provides := APISet
+	const namespace = "olm"
 
-	namespace := "olm"
-	catalog := registry.CatalogKey{"community", namespace}
-
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
+	Provides := APISet{opregistry.APIKey{Group: "g", Version: "v", Kind: "k", Plural: "ks"}: struct{}{}}
+	community := registry.CatalogKey{Name: "community", Namespace: namespace}
+	csvs := []*v1alpha1.ClusterServiceVersion{
+		existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil),
+	}
+	subs := []*v1alpha1.Subscription{
+		existingSub(namespace, "packageA.v1", "packageA", "alpha", community),
+		newSub(namespace, "packageB", "alpha", community),
+	}
 
 	opToAddVersionDeps := []*api.Dependency{
 		{
@@ -1237,21 +1233,15 @@ func TestSolveOperators_IgnoreUnsatisfiableDependencies(t *testing.T) {
 
 	fakeNamespacedOperatorCache := NamespacedOperatorCache{
 		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: {
-				key: registry.CatalogKey{
-					Namespace: "olm",
-					Name:      "community",
-				},
+			community: {
+				key: community,
 				operators: []*Operator{
 					genOperator("packageA.v1", "0.0.1", "", "packageA", "alpha", "community", "olm", nil, nil, nil, "", false),
 					genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps, "", false),
 					genOperator("packageC.v1", "0.1.0", "", "packageC", "alpha", "community", "olm", nil, nil, unsatisfiableVersionDeps, "", false),
 				},
 			},
-			registry.CatalogKey{
+			{
 				Namespace: "olm",
 				Name:      "certified",
 			}: {
@@ -1274,12 +1264,11 @@ func TestSolveOperators_IgnoreUnsatisfiableDependencies(t *testing.T) {
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(operators))
-
 	expected := OperatorSet{
-		"packageB.v1": genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "certified", "olm", nil, nil, opToAddVersionDeps, "", false),
+		"packageB.v1": genOperator("packageB.v1", "1.0.0", "", "packageB", "alpha", "community", "olm", nil, nil, opToAddVersionDeps, "", false),
 		"packageC.v1": genOperator("packageC.v1", "0.1.0", "", "packageC", "alpha", "certified", "olm", nil, nil, nil, "", false),
 	}
+	assert.Equal(t, len(expected), len(operators))
 	for k := range expected {
 		require.NotNil(t, operators[k])
 		assert.EqualValues(t, k, operators[k].Identifier())
@@ -1494,11 +1483,10 @@ func TestSolveOperators_SubscriptionlessOperatorsSatisfyDependencies(t *testing.
 
 	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(operators))
 	expected := OperatorSet{
-		"packageA.v1":     stripBundle(genOperator("packageA.v1", "", "", "packageA", "alpha", "@existing", catalog.Namespace, nil, Provides, nil, "", false)),
 		"packageB.v1.0.1": genOperator("packageB.v1.0.1", "1.0.1", "packageB.v1.0.0", "packageB", "alpha", catalog.Name, catalog.Namespace, Provides, nil, apiSetToDependencies(Provides, nil), "", false),
 	}
+	assert.Equal(t, len(expected), len(operators))
 	for k := range expected {
 		require.NotNil(t, operators[k])
 		assert.EqualValues(t, k, operators[k].Identifier())
@@ -1643,7 +1631,7 @@ func TestSolveOperators_TransferApiOwnership(t *testing.T) {
 				},
 			},
 			// nothing new to do here
-			expected: nil,
+			expected: OperatorSet{},
 		},
 		{
 			// will have two existing subs after resolving once
@@ -1657,12 +1645,12 @@ func TestSolveOperators_TransferApiOwnership(t *testing.T) {
 					genOperator("opA.v1.0.0", "1.0.0", "", "packageA", "stable", catalog.Name, catalog.Namespace, nil, Provides1, nil, "", false),
 					genOperator("opA.v1.0.1", "1.0.1", "opA.v1.0.0", "packageA", "stable", catalog.Name, catalog.Namespace, Requires1, nil, nil, "", false),
 					genOperator("opB.v1.0.0", "1.0.0", "", "packageB", "stable", catalog.Name, catalog.Namespace, Requires1, Provides2, nil, "stable", false),
-					genOperator("opB.v1.0.1", "1.0.1", "opB.v1.0.0", "packageB", "alpha", catalog.Name, catalog.Namespace, nil, ProvidesBoth, nil, "stable", false),
+					genOperator("opB.v1.0.1", "1.0.1", "opB.v1.0.0", "packageB", "stable", catalog.Name, catalog.Namespace, nil, ProvidesBoth, nil, "stable", false),
 				},
 			},
 			expected: OperatorSet{
 				"opA.v1.0.1": genOperator("opA.v1.0.1", "1.0.1", "opA.v1.0.0", "packageA", "stable", catalog.Name, catalog.Namespace, Requires1, nil, nil, "", false),
-				"opB.v1.0.1": genOperator("opB.v1.0.1", "1.0.1", "opB.v1.0.0", "packageB", "alpha", catalog.Name, catalog.Namespace, nil, ProvidesBoth, nil, "stable", false),
+				"opB.v1.0.1": genOperator("opB.v1.0.1", "1.0.1", "opB.v1.0.0", "packageB", "stable", catalog.Name, catalog.Namespace, nil, ProvidesBoth, nil, "stable", false),
 			},
 		},
 	}
@@ -1680,19 +1668,22 @@ func TestSolveOperators_TransferApiOwnership(t *testing.T) {
 		}
 		csvs := make([]*v1alpha1.ClusterServiceVersion, 0)
 		for _, o := range operators {
-			csvs = append(csvs, existingOperator(namespace, o.Identifier(), o.Bundle().PackageName, o.Bundle().ChannelName, o.Replaces(), o.ProvidedAPIs(), o.RequiredAPIs(), nil, nil))
+			var pkg, channel string
+			if b := o.Bundle(); b != nil {
+				pkg = b.PackageName
+				channel = b.ChannelName
+			}
+			csvs = append(csvs, existingOperator(namespace, o.Identifier(), pkg, channel, o.Replaces(), o.ProvidedAPIs(), o.RequiredAPIs(), nil, nil))
 		}
 
-		o, err := satResolver.SolveOperators([]string{"olm"}, csvs, p.subs)
-		if p.expected != nil {
-			assert.NoError(t, err)
-			operators = o
-		}
+		var err error
+		operators, err = satResolver.SolveOperators([]string{"olm"}, csvs, p.subs)
+		assert.NoError(t, err)
 		for k := range p.expected {
-			require.NotNil(t, o[k])
-			assert.EqualValues(t, k, o[k].Identifier())
+			require.NotNil(t, operators[k])
+			assert.EqualValues(t, k, operators[k].Identifier())
 		}
-		assert.Equal(t, len(p.expected), len(o))
+		assert.Equal(t, len(p.expected), len(operators))
 	}
 }
 
@@ -1751,31 +1742,19 @@ func stripBundle(o *Operator) *Operator {
 }
 
 func TestSolveOperators_WithoutDeprecated(t *testing.T) {
-	APISet := APISet{opregistry.APIKey{"g", "v", "k", "ks"}: struct{}{}}
-	Provides := APISet
-
 	namespace := "olm"
 	catalog := registry.CatalogKey{"community", namespace}
 
-	csv := existingOperator(namespace, "packageA.v1", "packageA", "alpha", "", Provides, nil, nil, nil)
-	csvs := []*v1alpha1.ClusterServiceVersion{csv}
-	sub := existingSub(namespace, "packageA.v1", "packageA", "alpha", catalog)
-	newSub := newSub(namespace, "packageB", "alpha", catalog)
-	subs := []*v1alpha1.Subscription{sub, newSub}
+	subs := []*v1alpha1.Subscription{
+		newSub(namespace, "packageA", "alpha", catalog),
+	}
 
 	fakeNamespacedOperatorCache := NamespacedOperatorCache{
 		snapshots: map[registry.CatalogKey]*CatalogSnapshot{
-			registry.CatalogKey{
-				Namespace: "olm",
-				Name:      "community",
-			}: {
-				key: registry.CatalogKey{
-					Namespace: "olm",
-					Name:      "community",
-				},
+			catalog: {
+				key: catalog,
 				operators: []*Operator{
-					genOperator("packageA.v2", "0.0.1", "packageA.v1", "packageA", "alpha", "community", "olm", nil, nil, nil, "", true),
-					genOperator("packageB.v1", "1.0.1", "", "packageB", "alpha", "community", "olm", nil, nil, nil, "", false),
+					genOperator("packageA.v1", "0.0.1", "packageA.v1", "packageA", "alpha", "community", "olm", nil, nil, nil, "", true),
 				},
 			},
 		},
@@ -1785,13 +1764,9 @@ func TestSolveOperators_WithoutDeprecated(t *testing.T) {
 		log:   logrus.New(),
 	}
 
-	operators, err := satResolver.SolveOperators([]string{"olm"}, csvs, subs)
-	assert.NoError(t, err)
-
-	expected := OperatorSet{
-		"packageB.v1": genOperator("packageB.v1", "1.0.1", "", "packageB", "alpha", "community", "olm", nil, nil, nil, "", false),
-	}
-	require.EqualValues(t, expected, operators)
+	operators, err := satResolver.SolveOperators([]string{"olm"}, nil, subs)
+	assert.Empty(t, operators)
+	assert.IsType(t, solver.NotSatisfiable{}, err)
 }
 
 func TestSolveOperators_WithSkips(t *testing.T) {
