@@ -180,6 +180,7 @@ func SharedResolverSpecs() []resolverTest {
 					{
 						Path:       "quay.io/test/bundle@sha256:abcd",
 						Identifier: "b.v1",
+						Properties: `{"properties":[{"type":"olm.gvk","value":{"group":"g","kind":"k","version":"v"}}]}`,
 						CatalogSourceRef: &corev1.ObjectReference{
 							Namespace: catalog.Namespace,
 							Name:      catalog.Name,
@@ -373,6 +374,7 @@ func SharedResolverSpecs() []resolverTest {
 						Path:       "quay.io/test/bundle@sha256:abcd",
 						Identifier: "a.v2",
 						Replaces:   "a.v1",
+						Properties: `{"properties":[{"type":"olm.gvk","value":{"group":"g","kind":"k","version":"v"}}]}`,
 						CatalogSourceRef: &corev1.ObjectReference{
 							Namespace: catalog.Namespace,
 							Name:      catalog.Name,

@@ -460,6 +460,19 @@ func WithChannel(channel string) OperatorPredicate {
 
 func WithPackage(pkg string) OperatorPredicate {
 	return func(o *Operator) bool {
+		for _, p := range o.Properties() {
+			if p.Type != opregistry.PackageType {
+				continue
+			}
+			var prop opregistry.PackageProperty
+			err := json.Unmarshal([]byte(p.Value), &prop)
+			if err != nil {
+				continue
+			}
+			if prop.PackageName == pkg {
+				return true
+			}
+		}
 		return o.Package() == pkg
 	}
 }
@@ -467,7 +480,7 @@ func WithPackage(pkg string) OperatorPredicate {
 func WithoutDeprecatedProperty() OperatorPredicate {
 	return func(o *Operator) bool {
 		for _, p := range o.bundle.GetProperties() {
-			if p.GetType() == string(opregistry.DeprecatedType) {
+			if p.GetType() == opregistry.DeprecatedType {
 				return false
 			}
 		}
@@ -477,6 +490,23 @@ func WithoutDeprecatedProperty() OperatorPredicate {
 
 func WithVersionInRange(r semver.Range) OperatorPredicate {
 	return func(o *Operator) bool {
+		for _, p := range o.Properties() {
+			if p.Type != opregistry.PackageType {
+				continue
+			}
+			var prop opregistry.PackageProperty
+			err := json.Unmarshal([]byte(p.Value), &prop)
+			if err != nil {
+				continue
+			}
+			ver, err := semver.Parse(prop.Version)
+			if err != nil {
+				continue
+			}
+			if r(ver) {
+				return true
+			}
+		}
 		return o.version != nil && r(*o.version)
 	}
 }
