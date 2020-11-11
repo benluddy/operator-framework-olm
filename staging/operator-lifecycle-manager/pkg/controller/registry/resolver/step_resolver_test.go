@@ -838,6 +838,19 @@ func TestNamespaceResolverRBAC(t *testing.T) {
 		},
 	}
 	bundle := bundleWithPermissions("a.v1", "a", "alpha", "", nil, nil, nil, nil, simplePermissions, simplePermissions)
+	defaultServiceAccountPermissions := []v1alpha1.StrategyDeploymentPermissions{
+		{
+			ServiceAccountName: "default",
+			Rules: []rbacv1.PolicyRule{
+				{
+					Verbs:     []string{"get", "list"},
+					APIGroups: []string{""},
+					Resources: []string{"configmaps"},
+				},
+			},
+		},
+	}
+	bundleWithDefaultServiceAccount := bundleWithPermissions("a.v1", "a", "alpha", "", nil, nil, nil, nil, defaultServiceAccountPermissions, defaultServiceAccountPermissions)
 	type out struct {
 		steps [][]*v1alpha1.Step
 		subs  []*v1alpha1.Subscription
@@ -858,6 +871,21 @@ func TestNamespaceResolverRBAC(t *testing.T) {
 			out: out{
 				steps: [][]*v1alpha1.Step{
 					bundleSteps(bundle, namespace, "", catalog),
+				},
+				subs: []*v1alpha1.Subscription{
+					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
+				},
+			},
+		},
+		{
+			name: "don't create default service accounts",
+			clusterState: []runtime.Object{
+				newSub(namespace, "a", "alpha", catalog),
+			},
+			bundlesInCatalog: []*api.Bundle{bundleWithDefaultServiceAccount},
+			out: out{
+				steps: [][]*v1alpha1.Step{
+					withoutResourceKind("ServiceAccount", bundleSteps(bundleWithDefaultServiceAccount, namespace, "", catalog)),
 				},
 				subs: []*v1alpha1.Subscription{
 					updatedSub(namespace, "a.v1", "", "a", "alpha", catalog),
@@ -1035,7 +1063,19 @@ func bundleSteps(bundle *api.Bundle, ns, replaces string, catalog CatalogKey) []
 	return steps
 }
 
-func subSteps(namespace, operatorName, pkgName, channelName string, catalog CatalogKey) []*v1alpha1.Step {
+func withoutResourceKind(kind string, steps []*v1alpha1.Step) []*v1alpha1.Step {
+	filtered := make([]*v1alpha1.Step, 0)
+
+	for i, s := range steps {
+		if s.Resource.Kind != kind {
+			filtered = append(filtered, steps[i])
+		}
+	}
+
+	return filtered
+}
+
+func subSteps(namespace, operatorName, pkgName, channelName string, catalog registry.CatalogKey) []*v1alpha1.Step {
 	sub := &v1alpha1.Subscription{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      strings.Join([]string{pkgName, channelName, catalog.Name, catalog.Namespace}, "-"),
