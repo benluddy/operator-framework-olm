@@ -104,7 +104,7 @@ func SharedResolverSpecs() []resolverTest {
 								solver.Dependency(),
 							},
 						},
-						Constraint: solver.Mandatory(),
+						Constraint: ConstraintSubscriptionExists,
 					},
 					{
 						Installable: &SubscriptionInstallable{
@@ -114,7 +114,7 @@ func SharedResolverSpecs() []resolverTest {
 								solver.Dependency(),
 							},
 						},
-						Constraint: solver.Dependency(),
+						Constraint: ConstraintSubscriptionWithoutCandidates,
 					},
 				},
 			},
@@ -269,12 +269,11 @@ func SharedResolverSpecs() []resolverTest {
 						Installable: &SubscriptionInstallable{
 							identifier: "a",
 							constraints: []solver.Constraint{
-								solver.Mandatory(),
-								solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
-								solver.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
+								ConstraintSubscriptionExists,
+								PrettyConstraint(solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"), "subscription to %s requires at least one of catsrc/catsrc-namespace/alpha/a.v1"),
 							},
 						},
-						Constraint: solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
+						Constraint: PrettyConstraint(solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"), "subscription to %s requires at least one of catsrc/catsrc-namespace/alpha/a.v1"),
 					},
 					{
 						Installable: &BundleInstallable{
@@ -287,12 +286,11 @@ func SharedResolverSpecs() []resolverTest {
 						Installable: &SubscriptionInstallable{
 							identifier: "a",
 							constraints: []solver.Constraint{
-								solver.Mandatory(),
-								solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"),
-								solver.AtMost(1, "catsrc/catsrc-namespace/alpha/a.v1"),
+								ConstraintSubscriptionExists,
+								PrettyConstraint(solver.Dependency("catsrc/catsrc-namespace/alpha/a.v1"), "subscription to %s requires at least one of catsrc/catsrc-namespace/alpha/a.v1"),
 							},
 						},
-						Constraint: solver.Mandatory(),
+						Constraint: ConstraintSubscriptionExists,
 					},
 				}),
 			},
