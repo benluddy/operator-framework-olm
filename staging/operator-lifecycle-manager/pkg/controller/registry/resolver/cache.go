@@ -411,7 +411,15 @@ func (s SortableSnapshots) Swap(i, j int) {
 	s.snapshots[i], s.snapshots[j] = s.snapshots[j], s.snapshots[i]
 }
 
-type OperatorPredicate func(*Operator) bool
+type OperatorPredicateFunc func(*Operator) bool
+
+func (opf OperatorPredicateFunc) Test(o *Operator) bool {
+	return opf(o)
+}
+
+type OperatorPredicate interface {
+	Test(*Operator) bool
+}
 
 func (s *CatalogSnapshot) Find(p ...OperatorPredicate) []*Operator {
 	s.m.RLock()
@@ -440,13 +448,13 @@ func (f EmptyOperatorFinder) Find(...OperatorPredicate) []*Operator {
 }
 
 func WithCSVName(name string) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		return o.name == name
-	}
+	})
 }
 
 func WithChannel(channel string) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		// all operators match the empty channel
 		if channel == "" {
 			return true
@@ -455,11 +463,11 @@ func WithChannel(channel string) OperatorPredicate {
 			return false
 		}
 		return o.bundle.ChannelName == channel
-	}
+	})
 }
 
 func WithPackage(pkg string) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		for _, p := range o.Properties() {
 			if p.Type != opregistry.PackageType {
 				continue
@@ -474,22 +482,22 @@ func WithPackage(pkg string) OperatorPredicate {
 			}
 		}
 		return o.Package() == pkg
-	}
+	})
 }
 
 func WithoutDeprecatedProperty() OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		for _, p := range o.bundle.GetProperties() {
 			if p.GetType() == opregistry.DeprecatedType {
 				return false
 			}
 		}
 		return true
-	}
+	})
 }
 
 func WithVersionInRange(r semver.Range) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		for _, p := range o.Properties() {
 			if p.Type != opregistry.PackageType {
 				continue
@@ -508,11 +516,11 @@ func WithVersionInRange(r semver.Range) OperatorPredicate {
 			}
 		}
 		return o.version != nil && r(*o.version)
-	}
+	})
 }
 
 func WithLabel(label string) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		for _, p := range o.Properties() {
 			if p.Type != opregistry.LabelType {
 				continue
@@ -527,11 +535,11 @@ func WithLabel(label string) OperatorPredicate {
 			}
 		}
 		return false
-	}
+	})
 }
 
 func ProvidingAPI(api opregistry.APIKey) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		for _, p := range o.Properties() {
 			if p.Type != opregistry.GVKType {
 				continue
@@ -546,19 +554,19 @@ func ProvidingAPI(api opregistry.APIKey) OperatorPredicate {
 			}
 		}
 		return false
-	}
+	})
 }
 
 func SkipRangeIncludes(version semver.Version) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		// TODO: lift range parsing to OperatorSurface
 		semverRange, err := semver.ParseRange(o.bundle.SkipRange)
 		return err == nil && semverRange(version)
-	}
+	})
 }
 
 func Replaces(name string) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		if o.Replaces() == name {
 			return true
 		}
@@ -568,29 +576,29 @@ func Replaces(name string) OperatorPredicate {
 			}
 		}
 		return false
-	}
+	})
 }
 
 func And(p ...OperatorPredicate) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		for _, l := range p {
-			if l(o) == false {
+			if l.Test(o) == false {
 				return false
 			}
 		}
 		return true
-	}
+	})
 }
 
 func Or(p ...OperatorPredicate) OperatorPredicate {
-	return func(o *Operator) bool {
+	return OperatorPredicateFunc(func(o *Operator) bool {
 		for _, l := range p {
-			if l(o) == true {
+			if l.Test(o) == true {
 				return true
 			}
 		}
 		return false
-	}
+	})
 }
 
 func AtLeast(n int, operators []*Operator) ([]*Operator, error) {
@@ -618,5 +626,21 @@ func Filter(operators []*Operator, p ...OperatorPredicate) []*Operator {
 }
 
 func Matches(o *Operator, p ...OperatorPredicate) bool {
-	return And(p...)(o)
+	return And(p...).Test(o)
+}
+
+func True() OperatorPredicate {
+	return OperatorPredicateFunc(func(*Operator) bool {
+		return true
+	})
+}
+
+func CountingPredicate(p OperatorPredicate, n *int) OperatorPredicate {
+	return OperatorPredicateFunc(func(o *Operator) bool {
+		if p.Test(o) {
+			*n++
+			return true
+		}
+		return false
+	})
 }
